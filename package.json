@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "具有独立标签页的侧边栏 · A DeepSeek Harness sidebar that shows artifacts and pops out into a standalone web tab.",
   "license": "MIT",
+  "type": "module",
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -11,5 +12,33 @@
     "artifacts",
     "plugin"
   ],
-  "main": "src/host.js"
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-theme",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
 }
