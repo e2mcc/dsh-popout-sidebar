@@ -22,6 +22,7 @@ return {
   apply(ctx) {
     let artifacts = []
     let seq = 0
+    let lastCwd // the most recently seen session working directory (workspace)
 
     const EXT_IMAGE = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1, svg: 1, bmp: 1, ico: 1, avif: 1 }
     const EXT_MARKDOWN = { md: 1, markdown: 1, mdx: 1, mdown: 1 }
@@ -69,13 +70,18 @@ return {
     ctx.on('tools/result', (exec, result) => {
       try {
         if (!exec || !result || result.isError === true) return
+        // Capture the session working directory on ANY successful tool result,
+        // so the file tree roots at the real workspace (not the process cwd).
+        const agent = exec.agent
+        if (agent && agent.session && agent.session.header && typeof agent.session.header.cwd === 'string' && agent.session.header.cwd) {
+          lastCwd = agent.session.header.cwd
+        }
         const name = exec.name
         if (name !== 'write' && name !== 'edit') return
         const args = exec.arguments
         const path = args && typeof args.file_path === 'string' ? args.file_path : ''
         if (!path) return
         let sessionId
-        const agent = exec.agent
         if (agent && agent.session && agent.session.id != null) sessionId = String(agent.session.id)
         let diff
         if (name === 'edit') {
@@ -119,6 +125,51 @@ return {
       return { ok: true }
     }
 
+    // Resolve the authoritative working directory for a session (the real
+    // workspace). The client passes its current session id; we look it up in the
+    // live session store so the tree roots correctly even before any tool runs.
+    const sessionCwd = (sessionId) => {
+      try {
+        const sessions = ctx.get('sessions')
+        if (sessions && typeof sessions.get === 'function' && typeof sessionId === 'string' && sessionId) {
+          const s = sessions.get(sessionId)
+          const c = s && s.header && typeof s.header.cwd === 'string' && s.header.cwd ? s.header.cwd : undefined
+          if (c) return c
+        }
+      } catch (e) {}
+      return undefined
+    }
+
+    // List one directory level for the file-tree (文件树) view: directories
+    // first, then files, case-insensitive name order.
+    const listDir = async (path, sessionId) => {
+      const fs = ctx.get('fs')
+      if (!fs) return { ok: false, error: 'filesystem unavailable' }
+      try {
+        const policy = ctx.get('sandboxPolicy')
+        const policyRoot = policy && typeof policy.workspaceRoot === 'string' ? policy.workspaceRoot : undefined
+        const cwd = sessionCwd(sessionId) || (typeof lastCwd === 'string' && lastCwd) || policyRoot
+        let p = path
+        if (typeof p !== 'string' || !p) {
+          if (!cwd) return { ok: false, error: 'missing path' }
+          p = cwd
+        }
+        const target = await fs.resolve(p, cwd ? { cwd: cwd } : undefined)
+        const entries = await fs.listDir(target)
+        const rows = entries
+          .map((e) => ({
+            name: e.name,
+            path: typeof fs.processPath === 'function' ? fs.processPath(e.target) : p.replace(/\/+$/, '') + '/' + e.name,
+            isDir: e.type === 'directory',
+            hidden: e.name.startsWith('.'),
+          }))
+          .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) : (a.isDir ? -1 : 1)))
+        return { ok: true, path: p, entries: rows }
+      } catch (e) {
+        return { ok: false, error: e && e.message ? String(e.message) : 'list failed' }
+      }
+    }
+
     // Package-private RPC (dynamic-plugin transport). Guarded so the same body
     // also runs as a static bundle (no `harness` global there); the static
     // client talks to the /artifacts-panel/* HTTP routes below instead.
@@ -126,6 +177,7 @@ return {
       harness.handle('artifacts.list', () => ({ artifacts: snapshot() }))
       harness.handle('artifacts.remove', (args) => removeFile(args && args.path))
       harness.handle('artifacts.read', (args) => readFile(args && args.path))
+      harness.handle('artifacts.listDir', (args) => listDir(args && args.path, args && args.sessionId))
     }
 
     const webServer = ctx.get('webServer')
@@ -595,6 +647,27 @@ return {
           res.end(JSON.stringify(out))
         },
       }), 'artifacts: remove route')
+      ctx.effect(() => webServer.register({
+        kind: 'exact',
+        path: '/artifacts-panel/listdir',
+        handler: async (req, res) => {
+          const qs = (req.url || '').split('?')[1] || ''
+          let path = ''
+          let sessionId = ''
+          const parts = qs.split('&')
+          for (let i = 0; i < parts.length; i += 1) {
+            const pair = parts[i]
+            const eq = pair.indexOf('=')
+            const k = decodeURIComponent(eq < 0 ? pair : pair.slice(0, eq))
+            const v = decodeURIComponent(eq < 0 ? '' : pair.slice(eq + 1))
+            if (k === 'path') path = v
+            else if (k === 'sessionId') sessionId = v
+          }
+          const out = await listDir(path || undefined, sessionId || undefined)
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'close' })
+          res.end(JSON.stringify(out))
+        },
+      }), 'artifacts: listdir route')
     }
   },
 }

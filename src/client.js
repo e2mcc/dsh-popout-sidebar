@@ -50,6 +50,11 @@ window.__ModuleLoader__.load({
           const path = args && typeof args.path === 'string' ? args.path : ''
           return fetch('/artifacts-panel/remove?path=' + encodeURIComponent(path), { method: 'POST' }).then((r) => r.json())
         }
+        if (method === 'artifacts.listDir') {
+          const path = args && typeof args.path === 'string' ? args.path : ''
+          const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : ''
+          return fetch('/artifacts-panel/listdir?path=' + encodeURIComponent(path) + '&sessionId=' + encodeURIComponent(sessionId)).then((r) => r.json())
+        }
         return Promise.reject(new Error('standalone-tab-sidebar: unknown host method ' + method))
       },
     }
@@ -65,6 +70,66 @@ window.__ModuleLoader__.load({
     const basename = (p) => {
       const parts = String(p).split('/')
       return parts[parts.length - 1] || p
+    }
+
+    // Preview type by extension (mirrors the host's kindOf), used by the file
+    // tree so a plain path can still pick the right renderer.
+    const EXT_IMAGE = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1, svg: 1, bmp: 1, ico: 1, avif: 1 }
+    const EXT_MARKDOWN = { md: 1, markdown: 1, mdx: 1, mdown: 1 }
+    const EXT_HTML = { html: 1, htm: 1, xhtml: 1 }
+    const extType = (path) => {
+      const m = /\.([^.]+)$/.exec(String(path || ''))
+      const ext = m ? m[1].toLowerCase() : ''
+      if (EXT_IMAGE[ext]) return 'image'
+      if (EXT_MARKDOWN[ext]) return 'markdown'
+      if (EXT_HTML[ext]) return 'html'
+      return 'text'
+    }
+
+    // The current session id, read from the client sessions store. The file
+    // tree passes it to the host so it can root at the session's workspace.
+    const currentSessionId = () => {
+      try {
+        const sessions = ctx.get('sessions')
+        const list = sessions && sessions.list
+        if (list && typeof list.getSnapshot === 'function') {
+          const snap = list.getSnapshot()
+          const id = snap && (snap.current != null ? snap.current : snap.active)
+          return typeof id === 'string' ? id : ''
+        }
+      } catch (e) {}
+      return ''
+    }
+
+    // Write `@path` into the current session's composer draft. Returns true on
+    // success, false when the input API is unavailable (caller then falls back
+    // to clipboard copy).
+    const quoteToComposer = (path) => {
+      try {
+        const sessions = ctx.get('sessions')
+        const conversation = ctx.get('conversation')
+        if (!sessions || !conversation) return false
+        const list = sessions.list
+        let sessionId
+        if (list && typeof list.getSnapshot === 'function') {
+          const snap = list.getSnapshot()
+          sessionId = snap && (snap.current != null ? snap.current : snap.active)
+        }
+        if (sessionId == null) return false
+        const actx = typeof sessions.scope === 'function' ? sessions.scope(sessionId) : undefined
+        if (!actx) return false
+        const input = conversation.input && typeof conversation.input.for === 'function' ? conversation.input.for(actx) : undefined
+        if (!input || typeof input.setDraft !== 'function') return false
+        let draft = ''
+        try {
+          if (input.state && typeof input.state.getSnapshot === 'function') draft = input.state.getSnapshot().draft || ''
+        } catch (e) {}
+        const text = '@' + path
+        input.setDraft(draft && draft.trim() !== '' ? draft + ' ' + text : text)
+        return true
+      } catch (e) {
+        return false
+      }
     }
 
     const fallbackCopy = (text) => {
@@ -105,6 +170,7 @@ window.__ModuleLoader__.load({
     const DEFAULT_SETTINGS = {
       autoRefresh: true,       // poll the artifact list while the panel is open
       minPanelWidth: 30,       // minimum panel width as % of window width
+      showFileTree: true,      // show the 文件树 (file tree) tab in the panel
     }
 
     function loadSettings() {
@@ -260,6 +326,33 @@ window.__ModuleLoader__.load({
 .artifacts-splitter:hover::after, .artifacts-splitter.artifacts-splitting::after { background: var(--dsw-alias-interactive-bg-hover-accent); }
 .artifacts-splitter.artifacts-splitting { user-select: none; }
 
+/* Tabs (产物 / 文件树) */
+.artifacts-tabs { flex: none; display: flex; align-items: stretch; height: 32px; border-bottom: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); }
+.artifacts-tab { flex: 1; border: none; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; cursor: pointer; border-right: 1px solid var(--dsw-alias-border-l1); }
+.artifacts-tab:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.artifacts-tab.is-active { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-active); }
+
+/* File tree (文件树) — styled like better-sidebar's explorer */
+.artifacts-tree { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.artifacts-tree-header { flex: none; justify-content: space-between; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 12px; display: flex; }
+.artifacts-tree-root { font: var(--dsw-font-s-14); color: var(--dsw-alias-label-secondary); text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+.artifacts-tree-refresh { width: 24px; height: 24px; color: var(--dsw-alias-label-secondary); cursor: pointer; background: transparent; border: none; border-radius: 6px; flex: none; justify-content: center; align-items: center; display: inline-flex; padding: 0; }
+.artifacts-tree-refresh:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.artifacts-tree-body { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 6px 8px; }
+.artifacts-tree-row { box-sizing: border-box; width: 100%; height: 34px; font: var(--dsw-font-s-14); color: var(--dsw-alias-label-primary); text-align: left; cursor: pointer; white-space: nowrap; background: transparent; border: none; border-radius: 8px; align-items: center; gap: 6px; padding: 0 8px; display: flex; animation: artifacts-row-in .15s var(--ds-ease-in-out, ease); }
+.artifacts-tree-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.artifacts-tree-dir { font: var(--dsw-font-s-strong-14); }
+.artifacts-tree-hidden { opacity: .45; }
+.artifacts-tree-name { flex: 1; min-width: 0; text-overflow: ellipsis; overflow: hidden; }
+.artifacts-tree-row.is-selected { background: var(--dsw-alias-interactive-bg-active); }
+.artifacts-tree-ref { border: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-2); height: 20px; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xxxs-strong-11); cursor: pointer; border-radius: 999px; flex: none; align-items: center; padding: 0 8px; display: none; }
+.artifacts-tree-ref:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.artifacts-tree-row:hover .artifacts-tree-ref, .artifacts-tree-row:focus-within .artifacts-tree-ref { display: inline-flex; }
+.artifacts-tree-copied { font: var(--dsw-font-xxxs-11); color: var(--dsw-alias-label-tertiary); flex: none; }
+.artifacts-tree-loading { cursor: default; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.artifacts-tree-error { cursor: default; color: var(--dsw-alias-state-error-primary); font-size: 12px; }
+@keyframes artifacts-row-in { 0% { opacity: 0 } }
+
 /* Settings section */
 .artifacts-settings { display: flex; flex-direction: column; gap: 14px; width: 100%; height: 100%; min-height: 0; overflow-y: auto; padding-bottom: 24px; }
 .artifacts-setintro { color: var(--dsw-alias-label-tertiary); margin: 0; padding: 0 2px; font-size: 13px; line-height: 20px; }
@@ -391,6 +484,164 @@ window.__ModuleLoader__.load({
       return React.createElement('div', { className: 'artifacts-preview-body' }, body)
     }
 
+    // Inline SVG icons replicating the DSH primitives icons better-sidebar uses
+    // (IconFolderClose16 / IconFolderOpen16 / IconCodeOutline16 /
+    // IconRefreshOutline16), drawn with `currentColor` so they follow the theme.
+    const FolderClosedIcon = (size) => React.createElement('svg', {
+      width: size, height: size, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
+    }, React.createElement('path', {
+      transform: 'translate(1.5 2.429)',
+      d: 'M5.05582 0.518756L4.50669 0.86654L5.05582 0.518756ZM13 9.4837L13.65 9.4837L13.65 3.53962L13 3.53962L12.35 3.53962L12.35 9.4837L13 9.4837ZM11.3264 1.86603L11.3264 1.21603L6.52313 1.21603L6.52313 1.86603L6.52313 2.51603L11.3264 2.51603L11.3264 1.86603ZM5.58054 1.34727L6.12968 0.999489L5.60495 0.170972L5.05582 0.518756L4.50669 0.86654L5.03141 1.69506L5.58054 1.34727ZM4.11323 1.23058e-13L4.11323 -0.65L1.67359 -0.65L1.67359 5.00699e-14L1.67359 0.65L4.11323 0.65L4.11323 1.23058e-13ZM0 1.67359L-0.65 1.67359L-0.65 9.4837L0 9.4837L0.65 9.4837L0.65 1.67359L0 1.67359ZM11.3264 11.1573L11.3264 10.5073L1.67359 10.5073L1.67359 11.1573L1.67359 11.8073L11.3264 11.8073L11.3264 11.1573ZM0 9.4837L-0.65 9.4837C-0.65 10.767 0.390308 11.8073 1.67359 11.8073L1.67359 11.1573L1.67359 10.5073C1.10828 10.5073 0.65 10.049 0.65 9.4837L0 9.4837ZM1.67359 5.00699e-14L1.67359 -0.65C0.390307 -0.65 -0.65 0.390309 -0.65 1.67359L0 1.67359L0.65 1.67359C0.65 1.10828 1.10828 0.65 1.67359 0.65L1.67359 5.00699e-14ZM5.05582 0.518756L5.60495 0.170972C5.28121 -0.340193 4.71829 -0.65 4.11323 -0.65L4.11323 1.23058e-13L4.11323 0.65C4.27282 0.65 4.4213 0.731715 4.50669 0.86654L5.05582 0.518756ZM6.52313 1.86603L6.52313 1.21603C6.36354 1.21603 6.21507 1.13431 6.12968 0.999489L5.58054 1.34727L5.03141 1.69506C5.35515 2.20622 5.91808 2.51603 6.52313 2.51603L6.52313 1.86603ZM13 3.53962L13.65 3.53962C13.65 2.25634 12.6097 1.21603 11.3264 1.21603L11.3264 1.86603L11.3264 2.51603C11.8917 2.51603 12.35 2.97431 12.35 3.53962L13 3.53962ZM13 9.4837L12.35 9.4837C12.35 10.049 11.8917 10.5073 11.3264 10.5073L11.3264 11.1573L11.3264 11.8073C12.6097 11.8073 13.65 10.767 13.65 9.4837L13 9.4837Z',
+      fill: 'currentColor',
+    }))
+
+    const FolderOpenIcon = (size) => React.createElement('svg', {
+      width: size, height: size, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
+    },
+      React.createElement('path', { d: 'M5.19629 1.57104C5.81144 1.5711 6.38623 1.8786 6.72754 2.39038L7.19922 3.09839C7.28454 3.22635 7.42824 3.30344 7.58203 3.30347H12.1699C13.5039 3.30348 14.5859 4.38548 14.5859 5.71948V6.62671C15.2694 7.02689 15.6605 7.85012 15.4385 8.68726L14.3848 12.658C14.1037 13.7164 13.1449 14.4527 12.0498 14.4529H2.91699C1.51651 14.4529 0.451662 13.2814 0.501954 11.9519V3.98706C0.501954 2.65305 1.58396 1.57104 2.91797 1.57104H5.19629ZM3.7793 7.75562C3.30994 7.75562 2.89883 8.07153 2.77832 8.52515L1.91602 11.7722C1.74167 12.4291 2.23734 13.073 2.91699 13.073H12.0498C12.5191 13.0728 12.9304 12.757 13.0508 12.3035L14.1045 8.33374C14.1819 8.04202 13.9619 7.756 13.6602 7.75562H3.7793ZM2.91797 2.9519C2.34625 2.9519 1.88281 3.41534 1.88281 3.98706V7.2937C2.33068 6.7269 3.02249 6.37476 3.7793 6.37476H13.2051V5.71948C13.2051 5.14777 12.7416 4.68434 12.1699 4.68433H7.58203C6.96675 4.6843 6.39209 4.37595 6.05078 3.86401L5.5791 3.15601C5.49379 3.02821 5.34995 2.95196 5.19629 2.9519H2.91797Z', fill: 'currentColor' }),
+      React.createElement('path', { opacity: '0.2', d: 'M13.6602 7.75525C13.9618 7.7556 14.1815 8.04179 14.1045 8.33337L13.0508 12.3031C12.9304 12.7567 12.5191 13.0725 12.0498 13.0726H2.91701C2.23744 13.0725 1.7417 12.4287 1.91603 11.7719L2.77834 8.52478C2.89898 8.07146 3.31018 7.75532 3.77931 7.75525H13.6602ZM5.1963 2.95154C5.34985 2.95159 5.49377 3.02803 5.57912 3.15564L6.0508 3.86365C6.39205 4.37553 6.96685 4.68385 7.58205 4.68396H12.1699C12.7416 4.68396 13.2049 5.14754 13.2051 5.71912V6.37439H3.77931C3.02267 6.37444 2.33067 6.72671 1.88283 7.29333V3.98669C1.88299 3.4152 2.34649 2.95168 2.91798 2.95154H5.1963Z', fill: 'currentColor' }),
+    )
+
+    const FileCodeIcon = (size) => React.createElement('svg', {
+      width: size, height: size, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
+    }, React.createElement('path', {
+      fillRule: 'evenodd', clipRule: 'evenodd',
+      d: 'M12.3368 1.53569L11.931 4.43172H14.8086V5.79673H11.7404L11.1962 9.67859H14.2839V11.0436H11.0056L10.4994 14.6529L9.14873 14.4643L9.62731 11.0436H5.75876L5.25252 14.6529L3.90186 14.4643L4.38043 11.0436H1.69141V9.67859H4.57104L5.11417 5.79673H2.21609V4.43172H5.30581L5.73724 1.34713L7.08995 1.53569L6.68414 4.43172H10.5527L10.9841 1.34713L12.3368 1.53569ZM5.94937 9.67859H9.81791L10.361 5.79673H6.49353L5.94937 9.67859Z',
+      fill: 'currentColor',
+    }))
+
+    const RefreshIcon = (size) => React.createElement('svg', {
+      width: size, height: size, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
+    }, React.createElement('path', { d: 'M7.92136 0.349152C10.3744 0.349234 12.5564 1.5052 13.9557 3.29894L15.1281 2.12759C15.3303 1.92546 15.6767 2.06943 15.6767 2.35538V5.53923C15.6766 5.71626 15.5329 5.85976 15.3559 5.86002H12.171C11.8854 5.8597 11.7426 5.51465 11.9443 5.31249L12.9641 4.29056C11.8237 2.74305 9.98908 1.74106 7.92136 1.74097C4.46436 1.74097 1.66233 4.543 1.66233 8C1.66233 11.457 4.46436 14.259 7.92136 14.259C11.3782 14.2589 14.1804 11.4569 14.1804 8H15.5722C15.5722 12.2251 12.1465 15.6507 7.92136 15.6508C3.69614 15.6508 0.270508 12.2252 0.270508 8C0.270508 3.77478 3.69614 0.349152 7.92136 0.349152Z', fill: 'currentColor' }))
+
+    // File tree (文件树): lazy-loaded recursive directory browser styled like
+    // better-sidebar's explorer — rounded rows, folder/file icons, a hover
+    // `@引用` pill, and a header with the root name + refresh.
+    const FileTree = (props) => {
+      const [root, setRoot] = React.useState(null)
+      const [children, setChildren] = React.useState({})
+      const [expanded, setExpanded] = React.useState({})
+      const [copiedPath, setCopiedPath] = React.useState(null)
+      const [copiedLabel, setCopiedLabel] = React.useState('')
+      const copyTimer = React.useRef(null)
+
+      const loadRoot = () => {
+        setChildren({})
+        setExpanded({})
+        setRoot(null)
+        host.call('artifacts.listDir', { sessionId: currentSessionId() }).then((res) => {
+          if (res && res.ok) setRoot({ path: res.path, entries: res.entries })
+        }).catch(() => {})
+      }
+
+      React.useEffect(() => { loadRoot() }, [])
+
+      const toggle = (path) => {
+        const nextExpanded = Object.assign({}, expanded, { [path]: !expanded[path] })
+        setExpanded(nextExpanded)
+        if (nextExpanded[path] && !children[path]) {
+          setChildren(Object.assign({}, children, { [path]: { loading: true } }))
+          host.call('artifacts.listDir', { path, sessionId: currentSessionId() }).then((res) => {
+            setChildren((prev) => Object.assign({}, prev, { [path]: res && res.ok ? { entries: res.entries } : { error: (res && res.error) || '读取失败' } }))
+          }).catch(() => {
+            setChildren((prev) => Object.assign({}, prev, { [path]: { error: '读取失败' } }))
+          })
+        }
+      }
+
+      const copyRef = (path) => {
+        const text = '@' + path
+        let label = '已复制'
+        const done = () => {
+          setCopiedPath(path)
+          setCopiedLabel(label)
+          clearTimeout(copyTimer.current)
+          copyTimer.current = setTimeout(() => { setCopiedPath(null); setCopiedLabel('') }, 1600)
+        }
+        // Prefer writing into the composer; fall back to clipboard copy.
+        if (quoteToComposer(path)) {
+          label = '已插入输入框'
+          done()
+          return
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, () => { fallbackCopy(text); done() })
+        } else { fallbackCopy(text); done() }
+      }
+
+      const rowActions = (entry) => (copiedPath === entry.path
+        ? React.createElement('span', { className: 'artifacts-tree-copied' }, copiedLabel || '已复制')
+        : React.createElement('button', {
+          type: 'button',
+          className: 'artifacts-tree-ref',
+          title: '引用到输入框（失败则复制 @path）',
+          onClick: (e) => { e.stopPropagation(); copyRef(entry.path) },
+        }, '@引用'))
+
+      const renderNode = (entry, depth) => {
+        const pad = { paddingLeft: 6 + depth * 20 }
+        const isSelected = props.selectedPath === entry.path
+        const rowClass = 'artifacts-tree-row' +
+          (entry.hidden ? ' artifacts-tree-hidden' : '') +
+          (isSelected ? ' is-selected' : '')
+        if (entry.isDir) {
+          const isExpanded = !!expanded[entry.path]
+          const node = children[entry.path]
+          return React.createElement('div', { key: entry.path },
+            React.createElement('div', {
+              role: 'button',
+              tabIndex: 0,
+              className: rowClass + ' artifacts-tree-dir',
+              style: pad,
+              onClick: () => toggle(entry.path),
+              onKeyDown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(entry.path) } },
+              title: entry.path,
+            },
+              isExpanded ? FolderOpenIcon(14) : FolderClosedIcon(14),
+              React.createElement('span', { className: 'artifacts-tree-name' }, entry.name),
+              rowActions(entry),
+            ),
+            isExpanded
+              ? (node && node.loading
+                ? React.createElement('div', { className: 'artifacts-tree-row artifacts-tree-loading', style: { paddingLeft: 6 + (depth + 1) * 20 + 20 } }, '加载中…')
+                : node && node.error
+                  ? React.createElement('div', { className: 'artifacts-tree-row artifacts-tree-error', style: { paddingLeft: 6 + (depth + 1) * 20 + 20 } }, node.error)
+                  : node && node.entries
+                    ? node.entries.map((c) => renderNode(c, depth + 1))
+                    : null)
+              : null,
+          )
+        }
+        return React.createElement('div', {
+          role: 'button',
+          tabIndex: 0,
+          className: rowClass,
+          style: pad,
+          onClick: () => { if (props.onOpen) props.onOpen(entry.path) },
+          onKeyDown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); if (props.onOpen) props.onOpen(entry.path) } },
+          title: entry.path,
+        },
+          FileCodeIcon(14),
+          React.createElement('span', { className: 'artifacts-tree-name' }, entry.name),
+          rowActions(entry),
+        )
+      }
+
+      return React.createElement('div', { className: 'artifacts-tree' },
+        React.createElement('div', { className: 'artifacts-tree-header' },
+          React.createElement('span', { className: 'artifacts-tree-root', title: root ? root.path : '' }, root ? basename(root.path) : '…'),
+          React.createElement('button', { type: 'button', className: 'artifacts-tree-refresh', title: '刷新', onClick: loadRoot }, RefreshIcon(14)),
+        ),
+        React.createElement('div', { className: 'artifacts-tree-body' },
+          !root
+            ? React.createElement('div', { className: 'artifacts-hint' }, '加载文件树…')
+            : (!root.entries || !root.entries.length)
+              ? React.createElement('div', { className: 'artifacts-hint' }, '（空目录）')
+              : root.entries.map((e) => renderNode(e, 0)),
+        ),
+      )
+    }
+
     const ArtifactsPanel = () => {
       const open = useOpen()
       const settings = useSettings()
@@ -404,6 +655,7 @@ window.__ModuleLoader__.load({
       const [resizing, setResizing] = React.useState(false)
       const [split, setSplit] = React.useState(0.45) // list/preview split ratio
       const [splitting, setSplitting] = React.useState(false)
+      const [activeView, setActiveView] = React.useState('artifacts') // 'artifacts' | 'tree'
       const bodyRef = React.useRef(null)
       const previewRef = React.useRef(null)
       const noticeTimer = React.useRef(null)
@@ -489,33 +741,6 @@ window.__ModuleLoader__.load({
           navigator.clipboard.writeText(text).then(done, () => { fallbackCopy(text); done() })
         } else { fallbackCopy(text); done() }
       }
-      const quoteToComposer = (path) => {
-        try {
-          const sessions = ctx.get('sessions')
-          const conversation = ctx.get('conversation')
-          if (!sessions || !conversation) return false
-          let sessionId
-          const list = sessions.list
-          if (list && typeof list.getSnapshot === 'function') {
-            const snap = list.getSnapshot()
-            sessionId = snap && (snap.current != null ? snap.current : snap.active)
-          }
-          if (sessionId == null) return false
-          const actx = typeof sessions.scope === 'function' ? sessions.scope(sessionId) : undefined
-          if (!actx) return false
-          const input = conversation.input && typeof conversation.input.for === 'function' ? conversation.input.for(actx) : undefined
-          if (!input || typeof input.setDraft !== 'function') return false
-          let draft = ''
-          try {
-            if (input.state && typeof input.state.getSnapshot === 'function') draft = input.state.getSnapshot().draft || ''
-          } catch (e) {}
-          const text = '@' + path
-          input.setDraft(draft && draft.trim() !== '' ? draft + ' ' + text : text)
-          return true
-        } catch (e) {
-          return false
-        }
-      }
       const quotePath = (path) => {
         if (quoteToComposer(path)) { flash('已插入输入框'); return }
         copyText('@' + path, '已复制 @引用（未能写入输入框）')
@@ -534,19 +759,22 @@ window.__ModuleLoader__.load({
         }).catch(() => flash('删除失败'))
       }
 
-      const select = (it) => {
-        const base = { path: it.path, type: it.type || 'text', diff: it.diff }
-        if (base.type === 'image') {
+      const openFile = (path, diff) => {
+        const type = extType(path)
+        const base = { path, type, diff: diff || null }
+        if (type === 'image') {
           setPreview(Object.assign({}, base, { loading: false }))
           return
         }
         setPreview(Object.assign({}, base, { loading: true }))
-        host.call('artifacts.read', { path: it.path }).then((res) => {
+        host.call('artifacts.read', { path }).then((res) => {
           setPreview(Object.assign({}, base, { loading: false }, res))
         }).catch((e) => {
           setPreview(Object.assign({}, base, { loading: false, ok: false, error: String(e && e.message ? e.message : e) }))
         })
       }
+
+      const select = (it) => openFile(it.path, it.diff)
 
       const listChildren = []
       if (!items.length) {
@@ -617,13 +845,29 @@ window.__ModuleLoader__.load({
           }, '删除'),
           React.createElement('button', { type: 'button', className: 'artifacts-iconbtn', title: '关闭', onClick: () => store.setOpen(false) }, '×'),
         ),
+        settings.showFileTree ? React.createElement('div', { className: 'artifacts-tabs' },
+          React.createElement('button', {
+            type: 'button',
+            className: 'artifacts-tab' + (activeView === 'artifacts' ? ' is-active' : ''),
+            onClick: () => setActiveView('artifacts'),
+          }, '产物'),
+          React.createElement('button', {
+            type: 'button',
+            className: 'artifacts-tab' + (activeView === 'tree' ? ' is-active' : ''),
+            onClick: () => setActiveView('tree'),
+          }, '文件树'),
+        ) : null,
         React.createElement('div', {
           className: 'artifacts-body',
           ref: bodyRef,
           style: { flex: '0 0 ' + (split * 100) + '%' },
         },
-          deleteMode ? React.createElement('div', { className: 'artifacts-delete-hint' }, '删除模式：点击产物标记，再点红色 × 删除') : null,
-          listChildren,
+          (activeView === 'tree' && settings.showFileTree)
+            ? React.createElement(FileTree, { onOpen: openFile, selectedPath: preview ? preview.path : null })
+            : [
+                deleteMode ? React.createElement('div', { className: 'artifacts-delete-hint' }, '删除模式：点击产物标记，再点红色 × 删除') : null,
+                listChildren,
+              ],
         ),
         React.createElement('div', {
           className: 'artifacts-splitter' + (splitting ? ' artifacts-splitting' : ''),
@@ -684,6 +928,12 @@ window.__ModuleLoader__.load({
             desc: '面板打开时定时拉取最新产物列表。',
             value: settings.autoRefresh,
             onToggle: (v) => set('autoRefresh', v),
+          }),
+          React.createElement(SettingsToggle, {
+            label: '文件树',
+            desc: '在侧边栏显示「文件树」标签页，浏览工作区目录。',
+            value: settings.showFileTree,
+            onToggle: (v) => set('showFileTree', v),
           }),
           React.createElement('div', { className: 'artifacts-setrow' },
             React.createElement('div', { className: 'artifacts-settext' },

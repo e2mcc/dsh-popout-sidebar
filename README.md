@@ -7,6 +7,7 @@
 ## 特性 / Features
 
 - 🗂 **产物侧边栏**：实时列出代理通过 `write` / `edit` 工具创建或修改的文件；产物列表与预览区之间的分界线可拖动调整。
+- 🌳 **文件树**：侧边栏内新增「文件树」标签页，可浏览工作区目录（懒加载展开，点击文件即预览）。
 - 👀 **多类型预览**：按文件类型预览——纯文本 / Markdown 渲染 / 图片 / HTML（沙箱 iframe），超长内容自动截断。
 - 📝 **编辑差异**：`edit` 修改过的文件在预览里展示「删除 / 新增」的改动片段对比。
 - 🔗 **复制 / 引用**：一键复制文件路径，或把 `@path` 引用写入会话输入框（悬浮在列表行）。
@@ -21,8 +22,8 @@
 
 - **Host（Node 进程）**
   - 监听 `tools/result` 事件，追踪 `write` / `edit` 的成功调用并提取 `file_path`（`edit` 额外记录 `old_string`/`new_string` 改动片段，并按扩展名标注预览类型）。
-  - 通过 `harness.handle` 暴露三个包私有 RPC：`artifacts.list`、`artifacts.read`、`artifacts.remove`。
-  - 通过 `webServer.register` 提供路由：`/artifacts-panel`（页面）、`/artifacts-panel/data`（JSON）、`/artifacts-panel/content`（文本预览）、`/artifacts-panel/media`（二进制图片）、`/artifacts-panel/remove`（删除单条产物）。
+  - 通过 `harness.handle` 暴露包私有 RPC：`artifacts.list`、`artifacts.read`、`artifacts.remove`、`artifacts.listDir`。
+  - 通过 `webServer.register` 提供路由：`/artifacts-panel`（页面）、`/artifacts-panel/data`（JSON）、`/artifacts-panel/content`（文本预览）、`/artifacts-panel/media`（二进制图片）、`/artifacts-panel/remove`（删除单条产物）、`/artifacts-panel/listdir`（目录列表）。
 - **Client（浏览器）**
   - 在 `conversation.session.header.utilities` 注册「产物」按钮（顶部最右侧）。
   - 在 `shell.overlay` 渲染浮动侧边栏面板。
@@ -77,6 +78,7 @@ dsh plugin --profile web add /绝对路径/dsh-standalone-tab-sidebar
 | 设置 | 默认 | 说明 |
 |---|---|---|
 | 自动刷新 | 开 | 面板打开时每 2s 拉取最新产物列表 |
+| 文件树 | 开 | 在侧边栏显示「文件树」标签页，浏览工作区目录 |
 | 最短面板宽度 | 30% | 面板最小宽度（占窗口宽度的百分比，20–60%）；更宽可通过拖动面板左边缘调整 |
 
 > 顶部「产物」按钮、独立标签页按钮（↗）、以及「自动让位到其他侧边栏左侧」均为常驻行为，无需开关。
