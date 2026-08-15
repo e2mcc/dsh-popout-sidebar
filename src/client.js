@@ -103,11 +103,8 @@ window.__ModuleLoader__.load({
     // Feature settings, persisted in localStorage so they survive reloads.
     const SETTINGS_KEY = 'dsh-standalone-tab-sidebar:settings'
     const DEFAULT_SETTINGS = {
-      showHeaderButton: true,      // 「产物」trigger in the session header
-      coexistWithBetterSidebar: true, // shift left of better-sidebar when it opens
-      autoRefresh: true,           // poll the artifact list while the panel is open
-      showPopout: true,            // ↗ standalone-tab button in the panel header
-      panelWidth: 380,             // panel width in px
+      autoRefresh: true,       // poll the artifact list while the panel is open
+      minPanelWidth: 30,       // minimum panel width as % of window width
     }
 
     function loadSettings() {
@@ -154,7 +151,7 @@ window.__ModuleLoader__.load({
 
     styles.insert(`
 .artifacts-panel {
-  position: fixed; top: 0; right: 0; bottom: 0; width: 380px; max-width: 92vw;
+  position: fixed; top: 0; right: var(--dsh-sidebar-width, 0px); bottom: 0; width: 30vw; max-width: calc(100vw - 24px); min-width: 0;
   display: flex; flex-direction: column;
   background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-primary);
@@ -182,7 +179,7 @@ window.__ModuleLoader__.load({
   cursor: pointer; font-size: 12px;
 }
 .artifacts-iconbtn:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.artifacts-body { flex: 1 1 45%; min-height: 0; overflow-y: auto; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.artifacts-body { flex: 1 1 45%; min-height: 0; overflow-y: auto; }
 .artifacts-empty { padding: 28px 16px; color: var(--dsw-alias-label-tertiary); text-align: center; }
 .artifacts-item {
   display: block; width: 100%; text-align: left; padding: 9px 12px;
@@ -250,7 +247,18 @@ window.__ModuleLoader__.load({
 .artifacts-diff-del .artifacts-diff-pre { background: rgba(236,19,19,0.05); }
 .artifacts-diff-add .artifacts-diff-pre { background: rgba(34,197,94,0.06); }
 .artifacts-panel { transition: right var(--ds-transition-duration-slow, 200ms) var(--ds-ease-in-out, ease); }
-.artifacts-panel.artifacts-coexist { right: var(--dsh-sidebar-width, 0px); }
+.artifacts-panel.artifacts-resizing { transition: none; user-select: none; }
+
+/* Resize handle on the panel's left edge */
+.artifacts-resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3; touch-action: none; }
+.artifacts-resize::after { content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: transparent; transition: background .15s; }
+.artifacts-resize:hover::after, .artifacts-resize:active::after { background: var(--dsw-alias-interactive-bg-hover-accent); }
+
+/* Divider between the artifact list and the preview (drag to resize) */
+.artifacts-splitter { flex: none; height: 6px; cursor: row-resize; position: relative; z-index: 2; touch-action: none; background: transparent; border-top: 1px solid var(--dsw-alias-border-l2); }
+.artifacts-splitter::after { content: ''; position: absolute; left: 0; right: 0; top: 2px; height: 2px; background: transparent; transition: background .15s; }
+.artifacts-splitter:hover::after, .artifacts-splitter.artifacts-splitting::after { background: var(--dsw-alias-interactive-bg-hover-accent); }
+.artifacts-splitter.artifacts-splitting { user-select: none; }
 
 /* Settings section */
 .artifacts-settings { display: flex; flex-direction: column; gap: 14px; width: 100%; height: 100%; min-height: 0; overflow-y: auto; padding-bottom: 24px; }
@@ -392,6 +400,12 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = React.useState('')
       const [deleteMode, setDeleteMode] = React.useState(false)
       const [deleteTarget, setDeleteTarget] = React.useState(null)
+      const [panelWidth, setPanelWidth] = React.useState(null) // null = use min
+      const [resizing, setResizing] = React.useState(false)
+      const [split, setSplit] = React.useState(0.45) // list/preview split ratio
+      const [splitting, setSplitting] = React.useState(false)
+      const bodyRef = React.useRef(null)
+      const previewRef = React.useRef(null)
       const noticeTimer = React.useRef(null)
 
       React.useEffect(() => {
@@ -415,6 +429,54 @@ window.__ModuleLoader__.load({
       if (!open) return null
 
       const popoutHref = '/artifacts-panel?scheme=' + popoutScheme()
+
+      // Panel width: at least `minPanelWidth`% of the window, wider via dragging
+      // the left edge. `panelWidth` holds the drag result (px); null → use the
+      // configured minimum.
+      const minWidthPx = Math.max(80, Math.round(window.innerWidth * (settings.minPanelWidth || 0) / 100))
+      const widthPx = panelWidth != null ? Math.max(panelWidth, minWidthPx) : minWidthPx
+
+      const startResize = (e) => {
+        e.preventDefault()
+        setResizing(true)
+        const rightOffset = (() => {
+          const v = document.documentElement.style.getPropertyValue('--dsh-sidebar-width')
+          const n = parseFloat(v)
+          return Number.isFinite(n) ? n : 0
+        })()
+        const onMove = (ev) => {
+          const w = window.innerWidth - ev.clientX - rightOffset
+          setPanelWidth(Math.max(minWidthPx, Math.min(w, window.innerWidth - rightOffset - 24)))
+        }
+        const onUp = () => {
+          setResizing(false)
+          document.removeEventListener('mousemove', onMove)
+          document.removeEventListener('mouseup', onUp)
+        }
+        document.addEventListener('mousemove', onMove)
+        document.addEventListener('mouseup', onUp)
+      }
+
+      const startSplit = (e) => {
+        e.preventDefault()
+        setSplitting(true)
+        const bodyEl = bodyRef.current
+        const previewEl = previewRef.current
+        if (!bodyEl || !previewEl) return
+        const top = bodyEl.getBoundingClientRect().top
+        const bottom = previewEl.getBoundingClientRect().bottom
+        const onMove = (ev) => {
+          const ratio = (ev.clientY - top) / (bottom - top)
+          setSplit(Math.max(0.15, Math.min(0.85, ratio)))
+        }
+        const onUp = () => {
+          setSplitting(false)
+          document.removeEventListener('mousemove', onMove)
+          document.removeEventListener('mouseup', onUp)
+        }
+        document.addEventListener('mousemove', onMove)
+        document.addEventListener('mouseup', onUp)
+      }
 
       const flash = (msg) => {
         setNotice(msg)
@@ -526,22 +588,27 @@ window.__ModuleLoader__.load({
       })
 
       return React.createElement('div', {
-        className: 'artifacts-panel' + (settings.coexistWithBetterSidebar ? ' artifacts-coexist' : ''),
-        style: { width: settings.panelWidth },
+        className: 'artifacts-panel' + (resizing ? ' artifacts-resizing' : ''),
+        style: { width: widthPx },
         role: 'dialog', 'aria-label': 'Artifacts',
       },
+        React.createElement('div', {
+          className: 'artifacts-resize',
+          title: '拖动调整宽度',
+          onMouseDown: startResize,
+        }),
         React.createElement('div', { className: 'artifacts-head' },
           React.createElement('span', { className: 'artifacts-title' }, '产物 Artifacts'),
           React.createElement('span', { className: 'artifacts-count' }, String(items.length)),
           notice ? React.createElement('span', { className: 'artifacts-notice' }, notice) : null,
           React.createElement('span', { className: 'artifacts-spacer' }),
-          settings.showPopout ? React.createElement('a', {
+          React.createElement('a', {
             className: 'artifacts-link',
             href: popoutHref,
             target: '_blank',
             rel: 'noreferrer noopener',
             title: '在新标签页打开（可拖到另一块显示器）',
-          }, '↗') : null,
+          }, '↗'),
           React.createElement('button', {
             type: 'button',
             className: 'artifacts-iconbtn' + (deleteMode ? ' artifacts-delete-on' : ''),
@@ -550,11 +617,24 @@ window.__ModuleLoader__.load({
           }, '删除'),
           React.createElement('button', { type: 'button', className: 'artifacts-iconbtn', title: '关闭', onClick: () => store.setOpen(false) }, '×'),
         ),
-        React.createElement('div', { className: 'artifacts-body' },
+        React.createElement('div', {
+          className: 'artifacts-body',
+          ref: bodyRef,
+          style: { flex: '0 0 ' + (split * 100) + '%' },
+        },
           deleteMode ? React.createElement('div', { className: 'artifacts-delete-hint' }, '删除模式：点击产物标记，再点红色 × 删除') : null,
           listChildren,
         ),
-        React.createElement('div', { className: 'artifacts-preview' },
+        React.createElement('div', {
+          className: 'artifacts-splitter' + (splitting ? ' artifacts-splitting' : ''),
+          title: '拖动调整产物列表与预览的分界',
+          onMouseDown: startSplit,
+        }),
+        React.createElement('div', {
+          className: 'artifacts-preview',
+          ref: previewRef,
+          style: { flex: '1 1 0%' },
+        },
           preview ? renderPreview(preview) : React.createElement('div', { className: 'artifacts-hint' }, '← 点击左侧文件预览内容'),
         ),
       )
@@ -562,8 +642,6 @@ window.__ModuleLoader__.load({
 
     const HeaderAction = () => {
       const open = useOpen()
-      const settings = useSettings()
-      if (!settings.showHeaderButton) return null
       return React.createElement('button', {
         type: 'button',
         className: 'artifacts-headbtn' + (open ? ' is-open' : ''),
@@ -602,48 +680,30 @@ window.__ModuleLoader__.load({
         React.createElement('p', { className: 'artifacts-setintro' }, '管理「单页侧卡」的显示与行为。'),
         React.createElement('div', { className: 'artifacts-setgroup' },
           React.createElement(SettingsToggle, {
-            label: '显示顶部按钮',
-            desc: '在会话顶部右侧显示「产物」按钮。',
-            value: settings.showHeaderButton,
-            onToggle: (v) => set('showHeaderButton', v),
-          }),
-          React.createElement(SettingsToggle, {
-            label: '与 better sidebar 并排显示',
-            desc: '当 better sidebar 打开时，本侧边栏自动让位到其左侧，避免被遮挡。',
-            value: settings.coexistWithBetterSidebar,
-            onToggle: (v) => set('coexistWithBetterSidebar', v),
-          }),
-          React.createElement(SettingsToggle, {
             label: '自动刷新',
             desc: '面板打开时定时拉取最新产物列表。',
             value: settings.autoRefresh,
             onToggle: (v) => set('autoRefresh', v),
           }),
-          React.createElement(SettingsToggle, {
-            label: '独立标签页按钮',
-            desc: '在面板右上角显示 ↗ 弹出到独立标签页的按钮。',
-            value: settings.showPopout,
-            onToggle: (v) => set('showPopout', v),
-          }),
           React.createElement('div', { className: 'artifacts-setrow' },
             React.createElement('div', { className: 'artifacts-settext' },
-              React.createElement('div', { className: 'artifacts-settitle' }, '面板宽度'),
-              React.createElement('div', { className: 'artifacts-setdesc' }, '侧边栏面板宽度（像素，260–640）。'),
+              React.createElement('div', { className: 'artifacts-settitle' }, '最短面板宽度'),
+              React.createElement('div', { className: 'artifacts-setdesc' }, '面板的最小宽度（占窗口宽度的百分比，20–60）；更宽可通过拖动面板左边缘调整。'),
             ),
             React.createElement('div', { className: 'artifacts-setcontrol' },
               React.createElement('input', {
                 type: 'number',
                 className: 'artifacts-widthinput',
-                min: 260,
-                max: 640,
-                value: settings.panelWidth,
+                min: 20,
+                max: 60,
+                value: settings.minPanelWidth,
                 onChange: (e) => {
                   const n = parseInt(e.currentTarget.value, 10)
                   if (Number.isNaN(n)) return
-                  set('panelWidth', Math.max(260, Math.min(640, n)))
+                  set('minPanelWidth', Math.max(20, Math.min(60, n)))
                 },
               }),
-              React.createElement('span', { className: 'artifacts-suffix' }, 'px'),
+              React.createElement('span', { className: 'artifacts-suffix' }, '%'),
             ),
           ),
         ),
