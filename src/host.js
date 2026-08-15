@@ -140,6 +140,28 @@ return {
       return undefined
     }
 
+    // When the client does not supply a session id (the standalone tab is a
+    // separate page with no client store), pick the most recently created live
+    // session's working directory.
+    const defaultSessionCwd = () => {
+      try {
+        const sessions = ctx.get('sessions')
+        if (sessions && typeof sessions.list === 'function') {
+          const live = sessions.list()
+          let best
+          let bestAt = -1
+          for (let i = 0; i < live.length; i += 1) {
+            const s = live[i]
+            const c = s && s.header && typeof s.header.cwd === 'string' && s.header.cwd ? s.header.cwd : undefined
+            const at = s && s.header && typeof s.header.createdAt === 'number' ? s.header.createdAt : 0
+            if (c && at > bestAt) { best = c; bestAt = at }
+          }
+          if (best) return best
+        }
+      } catch (e) {}
+      return undefined
+    }
+
     // List one directory level for the file-tree (文件树) view: directories
     // first, then files, case-insensitive name order.
     const listDir = async (path, sessionId) => {
@@ -148,7 +170,7 @@ return {
       try {
         const policy = ctx.get('sandboxPolicy')
         const policyRoot = policy && typeof policy.workspaceRoot === 'string' ? policy.workspaceRoot : undefined
-        const cwd = sessionCwd(sessionId) || (typeof lastCwd === 'string' && lastCwd) || policyRoot
+        const cwd = sessionCwd(sessionId) || defaultSessionCwd() || (typeof lastCwd === 'string' && lastCwd) || policyRoot
         let p = path
         if (typeof p !== 'string' || !p) {
           if (!cwd) return { ok: false, error: 'missing path' }
@@ -298,6 +320,31 @@ return {
   .diff-block.del .diff-pre { background: rgba(236,19,19,0.05); }
   .diff-block.add .diff-pre { background: rgba(34,197,94,0.06); }
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--p-bg-layer-1); border: 1px solid var(--p-border-l2); color: var(--p-text); padding: 6px 14px; border-radius: 8px; font-size: 12px; opacity: 0; transition: opacity .18s; pointer-events: none; box-shadow: var(--p-shadow); z-index: 10; }
+  .tabs { display: flex; align-items: stretch; height: 34px; border-bottom: 1px solid var(--p-border-l2); background: var(--p-bg-layer-1); flex: none; }
+  .tab { flex: 1; border: none; background: transparent; color: var(--p-text-secondary); font: inherit; font-size: 12px; cursor: pointer; border-right: 1px solid var(--p-border-l1); }
+  .tab:hover { background: var(--p-hover); }
+  .tab.is-active { color: var(--p-text); background: var(--p-hover); }
+  .list.is-hidden { display: none; }
+  .tree { width: 340px; flex: none; display: none; flex-direction: column; border-right: 1px solid var(--p-border-l2); }
+  .tree.is-active { display: flex; }
+  .tree-head { flex: none; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--p-border-l2); }
+  .tree-root { flex: 1; min-width: 0; color: var(--p-text-secondary); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-refresh { width: 24px; height: 24px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--p-text-secondary); cursor: pointer; background: transparent; border: none; border-radius: 6px; padding: 0; }
+  .tree-refresh:hover { background: var(--p-hover); color: var(--p-text); }
+  .tree-body { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 6px 8px; }
+  .tree .empty { padding: 32px 20px; color: var(--p-text-tertiary); text-align: center; }
+  .tree-row { box-sizing: border-box; display: flex; align-items: center; gap: 6px; width: 100%; height: 34px; padding: 0 8px; cursor: pointer; white-space: nowrap; color: var(--p-text); font-size: 14px; border-radius: 8px; }
+  .tree-row:hover { background: var(--p-hover); }
+  .tree-row.is-selected { background: var(--p-hover); }
+  .tree-dir { font-weight: 600; }
+  .tree-hidden { opacity: .45; }
+  .tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .tree-ref { height: 20px; border: 1px solid var(--p-border-l1); background: var(--p-bg-layer-2); color: var(--p-text-tertiary); font-size: 11px; font-weight: 600; cursor: pointer; border-radius: 999px; flex: none; align-items: center; padding: 0 8px; display: none; }
+  .tree-ref:hover { background: var(--p-hover); color: var(--p-text); }
+  .tree-row:hover .tree-ref, .tree-row:focus-within .tree-ref { display: inline-flex; }
+  .tree-copied { font-size: 11px; color: var(--p-text-tertiary); flex: none; }
+  .tree-loading { color: var(--p-text-tertiary); cursor: default; font-size: 12px; }
+  .tree-error { color: var(--p-error); cursor: default; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -307,8 +354,19 @@ return {
     <span class="spacer"></span>
     <span class="status" id="status">connecting…</span>
   </header>
+  <div class="tabs" id="tabs">
+    <button class="tab is-active" data-view="artifacts">产物</button>
+    <button class="tab" data-view="tree">文件树</button>
+  </div>
   <main>
     <div class="list" id="list"></div>
+    <div class="tree" id="tree">
+      <div class="tree-head">
+        <span class="tree-root" id="treeRoot">…</span>
+        <button class="tree-refresh" id="treeRefresh" title="刷新" type="button"></button>
+      </div>
+      <div class="tree-body" id="treeBody"></div>
+    </div>
     <div class="preview">
       <div class="bar" id="bar"><span class="path">Select a file to preview</span></div>
       <div class="area" id="previewArea"><div class="hint">← 点击左侧文件预览内容</div></div>
@@ -319,9 +377,55 @@ return {
     var DATA_URL = '/artifacts-panel/data';
     var CONTENT_URL = '/artifacts-panel/content';
     var MEDIA_URL = '/artifacts-panel/media';
+    var LISTDIR_URL = '/artifacts-panel/listdir';
     var items = [];
     var selectedPath = null;
     var selectedItem = null;
+    var treeRoot = null;
+    var treeChildren = {};
+    var treeExpanded = {};
+    var currentView = 'artifacts';
+
+    var EXT_IMAGE = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1, svg: 1, bmp: 1, ico: 1, avif: 1 };
+    var EXT_MARKDOWN = { md: 1, markdown: 1, mdx: 1, mdown: 1 };
+    var EXT_HTML = { html: 1, htm: 1, xhtml: 1 };
+    function extType(path) {
+      var m = /\.([^.]+)$/.exec(String(path || ''));
+      var ext = m ? m[1].toLowerCase() : '';
+      if (EXT_IMAGE[ext]) return 'image';
+      if (EXT_MARKDOWN[ext]) return 'markdown';
+      if (EXT_HTML[ext]) return 'html';
+      return 'text';
+    }
+
+    var FOLDER_CLOSE_D = 'M5.05582 0.518756L4.50669 0.86654L5.05582 0.518756ZM13 9.4837L13.65 9.4837L13.65 3.53962L13 3.53962L12.35 3.53962L12.35 9.4837L13 9.4837ZM11.3264 1.86603L11.3264 1.21603L6.52313 1.21603L6.52313 1.86603L6.52313 2.51603L11.3264 2.51603L11.3264 1.86603ZM5.58054 1.34727L6.12968 0.999489L5.60495 0.170972L5.05582 0.518756L4.50669 0.86654L5.03141 1.69506L5.58054 1.34727ZM4.11323 1.23058e-13L4.11323 -0.65L1.67359 -0.65L1.67359 5.00699e-14L1.67359 0.65L4.11323 0.65L4.11323 1.23058e-13ZM0 1.67359L-0.65 1.67359L-0.65 9.4837L0 9.4837L0.65 9.4837L0.65 1.67359L0 1.67359ZM11.3264 11.1573L11.3264 10.5073L1.67359 10.5073L1.67359 11.1573L1.67359 11.8073L11.3264 11.8073L11.3264 11.1573ZM0 9.4837L-0.65 9.4837C-0.65 10.767 0.390308 11.8073 1.67359 11.8073L1.67359 11.1573L1.67359 10.5073C1.10828 10.5073 0.65 10.049 0.65 9.4837L0 9.4837ZM1.67359 5.00699e-14L1.67359 -0.65C0.390307 -0.65 -0.65 0.390309 -0.65 1.67359L0 1.67359L0.65 1.67359C0.65 1.10828 1.10828 0.65 1.67359 0.65L1.67359 5.00699e-14ZM5.05582 0.518756L5.60495 0.170972C5.28121 -0.340193 4.71829 -0.65 4.11323 -0.65L4.11323 1.23058e-13L4.11323 0.65C4.27282 0.65 4.4213 0.731715 4.50669 0.86654L5.05582 0.518756ZM6.52313 1.86603L6.52313 1.21603C6.36354 1.21603 6.21507 1.13431 6.12968 0.999489L5.58054 1.34727L5.03141 1.69506C5.35515 2.20622 5.91808 2.51603 6.52313 2.51603L6.52313 1.86603ZM13 3.53962L13.65 3.53962C13.65 2.25634 12.6097 1.21603 11.3264 1.21603L11.3264 1.86603L11.3264 2.51603C11.8917 2.51603 12.35 2.97431 12.35 3.53962L13 3.53962ZM13 9.4837L12.35 9.4837C12.35 10.049 11.8917 10.5073 11.3264 10.5073L11.3264 11.1573L11.3264 11.8073C12.6097 11.8073 13.65 10.767 13.65 9.4837L13 9.4837Z';
+    var FOLDER_OPEN_D1 = 'M5.19629 1.57104C5.81144 1.5711 6.38623 1.8786 6.72754 2.39038L7.19922 3.09839C7.28454 3.22635 7.42824 3.30344 7.58203 3.30347H12.1699C13.5039 3.30348 14.5859 4.38548 14.5859 5.71948V6.62671C15.2694 7.02689 15.6605 7.85012 15.4385 8.68726L14.3848 12.658C14.1037 13.7164 13.1449 14.4527 12.0498 14.4529H2.91699C1.51651 14.4529 0.451662 13.2814 0.501954 11.9519V3.98706C0.501954 2.65305 1.58396 1.57104 2.91797 1.57104H5.19629ZM3.7793 7.75562C3.30994 7.75562 2.89883 8.07153 2.77832 8.52515L1.91602 11.7722C1.74167 12.4291 2.23734 13.073 2.91699 13.073H12.0498C12.5191 13.0728 12.9304 12.757 13.0508 12.3035L14.1045 8.33374C14.1819 8.04202 13.9619 7.756 13.6602 7.75562H3.7793ZM2.91797 2.9519C2.34625 2.9519 1.88281 3.41534 1.88281 3.98706V7.2937C2.33068 6.7269 3.02249 6.37476 3.7793 6.37476H13.2051V5.71948C13.2051 5.14777 12.7416 4.68434 12.1699 4.68433H7.58203C6.96675 4.6843 6.39209 4.37595 6.05078 3.86401L5.5791 3.15601C5.49379 3.02821 5.34995 2.95196 5.19629 2.9519H2.91797Z';
+    var FOLDER_OPEN_D2 = 'M13.6602 7.75525C13.9618 7.7556 14.1815 8.04179 14.1045 8.33337L13.0508 12.3031C12.9304 12.7567 12.5191 13.0725 12.0498 13.0726H2.91701C2.23744 13.0725 1.7417 12.4287 1.91603 11.7719L2.77834 8.52478C2.89898 8.07146 3.31018 7.75532 3.77931 7.75525H13.6602ZM5.1963 2.95154C5.34985 2.95159 5.49377 3.02803 5.57912 3.15564L6.0508 3.86365C6.39205 4.37553 6.96685 4.68385 7.58205 4.68396H12.1699C12.7416 4.68396 13.2049 5.14754 13.2051 5.71912V6.37439H3.77931C3.02267 6.37444 2.33067 6.72671 1.88283 7.29333V3.98669C1.88299 3.4152 2.34649 2.95168 2.91798 2.95154H5.1963Z';
+    var CODE_D = 'M12.3368 1.53569L11.931 4.43172H14.8086V5.79673H11.7404L11.1962 9.67859H14.2839V11.0436H11.0056L10.4994 14.6529L9.14873 14.4643L9.62731 11.0436H5.75876L5.25252 14.6529L3.90186 14.4643L4.38043 11.0436H1.69141V9.67859H4.57104L5.11417 5.79673H2.21609V4.43172H5.30581L5.73724 1.34713L7.08995 1.53569L6.68414 4.43172H10.5527L10.9841 1.34713L12.3368 1.53569ZM5.94937 9.67859H9.81791L10.361 5.79673H6.49353L5.94937 9.67859Z';
+    var REFRESH_D = 'M7.92136 0.349152C10.3744 0.349234 12.5564 1.5052 13.9557 3.29894L15.1281 2.12759C15.3303 1.92546 15.6767 2.06943 15.6767 2.35538V5.53923C15.6766 5.71626 15.5329 5.85976 15.3559 5.86002H12.171C11.8854 5.8597 11.7426 5.51465 11.9443 5.31249L12.9641 4.29056C11.8237 2.74305 9.98908 1.74106 7.92136 1.74097C4.46436 1.74097 1.66233 4.543 1.66233 8C1.66233 11.457 4.46436 14.259 7.92136 14.259C11.3782 14.2589 14.1804 11.4569 14.1804 8H15.5722C15.5722 12.2251 12.1465 15.6507 7.92136 15.6508C3.69614 15.6508 0.270508 12.2252 0.270508 8C0.270508 3.77478 3.69614 0.349152 7.92136 0.349152Z';
+
+    function svgIcon(paths, size) {
+      var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('width', size || 14);
+      svg.setAttribute('height', size || 14);
+      svg.setAttribute('viewBox', '0 0 16 16');
+      svg.setAttribute('fill', 'none');
+      (paths || []).forEach(function (spec) {
+        var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        p.setAttribute('d', spec.d);
+        if (spec.transform) p.setAttribute('transform', spec.transform);
+        if (spec.opacity) p.setAttribute('opacity', spec.opacity);
+        if (spec.fillRule) p.setAttribute('fill-rule', spec.fillRule);
+        if (spec.clipRule) p.setAttribute('clip-rule', spec.clipRule);
+        p.setAttribute('fill', 'currentColor');
+        svg.appendChild(p);
+      });
+      return svg;
+    }
+    function folderClosedIcon() { return svgIcon([{ d: FOLDER_CLOSE_D, transform: 'translate(1.5 2.429)' }]); }
+    function folderOpenIcon() { return svgIcon([{ d: FOLDER_OPEN_D1 }, { d: FOLDER_OPEN_D2, opacity: '0.2' }]); }
+    function fileCodeIcon() { return svgIcon([{ d: CODE_D, fillRule: 'evenodd', clipRule: 'evenodd' }]); }
+    function refreshIcon() { return svgIcon([{ d: REFRESH_D }]); }
 
     function el(tag, className, text) {
       var n = document.createElement(tag);
@@ -474,37 +578,38 @@ return {
         list.appendChild(item);
       });
     }
-    function select(it) {
-      selectedPath = it.path;
-      selectedItem = it;
+    function openPath(path, diff) {
+      selectedPath = path;
+      selectedItem = null;
       render();
+      if (treeRoot) renderTree();
       var bar = document.getElementById('bar');
       var area = document.getElementById('previewArea');
       area.textContent = '';
       bar.textContent = '';
-      bar.appendChild(el('span', 'path', it.path));
+      bar.appendChild(el('span', 'path', path));
       var cp = el('button', 'mini-btn', '⧉');
       cp.title = '复制路径';
-      cp.addEventListener('click', function () { copyText(it.path, '已复制路径'); });
+      cp.addEventListener('click', function () { copyText(path, '已复制路径'); });
       bar.appendChild(cp);
       var qt = el('button', 'mini-btn', '@');
       qt.title = '复制 @path 引用';
-      qt.addEventListener('click', function () { copyText('@' + it.path, '已复制 @引用'); });
+      qt.addEventListener('click', function () { copyText('@' + path, '已复制 @引用'); });
       bar.appendChild(qt);
 
-      var type = it.type || 'text';
+      var type = extType(path);
       if (type === 'image') {
         var img = el('img', 'preview-img');
-        img.src = MEDIA_URL + '?path=' + encodeURIComponent(it.path);
-        img.alt = it.path;
+        img.src = MEDIA_URL + '?path=' + encodeURIComponent(path);
+        img.alt = path;
         img.addEventListener('error', function () { area.textContent = ''; area.appendChild(errNode('图片加载失败')); });
         area.appendChild(img);
-        if (it.diff) area.appendChild(diffNode(it.diff));
+        if (diff) area.appendChild(diffNode(diff));
         return;
       }
-      fetch(CONTENT_URL + '?path=' + encodeURIComponent(it.path)).then(function (r) { return r.json(); }).then(function (data) {
+      fetch(CONTENT_URL + '?path=' + encodeURIComponent(path)).then(function (r) { return r.json(); }).then(function (data) {
         if (!data || data.ok !== true) { area.appendChild(errNode(data && data.error)); return; }
-        if (it.diff) area.appendChild(diffNode(it.diff));
+        if (diff) area.appendChild(diffNode(diff));
         if (type === 'html') {
           var frame = el('iframe', 'preview-iframe');
           frame.setAttribute('sandbox', 'allow-scripts');
@@ -522,6 +627,135 @@ return {
       }).catch(function (e) {
         area.appendChild(errNode(String(e && e.message ? e.message : e)));
       });
+    }
+
+    function select(it) { openPath(it.path, it.diff); }
+
+    // ── File tree (文件树) ────────────────────────────────────────────────
+    function setView(view) {
+      currentView = view;
+      var tabs = document.querySelectorAll('.tab');
+      for (var i = 0; i < tabs.length; i += 1) {
+        tabs[i].classList.toggle('is-active', tabs[i].getAttribute('data-view') === view);
+      }
+      document.getElementById('list').classList.toggle('is-hidden', view !== 'artifacts');
+      document.getElementById('tree').classList.toggle('is-active', view === 'tree');
+      if (view === 'tree' && !treeRoot) loadTreeRoot();
+    }
+
+    function loadTreeRoot() {
+      treeRoot = null;
+      treeChildren = {};
+      treeExpanded = {};
+      var rootLabel = document.getElementById('treeRoot');
+      if (rootLabel) rootLabel.textContent = '…';
+      var bodyEl = document.getElementById('treeBody');
+      bodyEl.textContent = '';
+      bodyEl.appendChild(el('div', 'tree-loading', '加载文件树…'));
+      fetch(LISTDIR_URL, { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (res) {
+        if (res && res.ok) {
+          treeRoot = { path: res.path, entries: res.entries };
+          if (rootLabel) rootLabel.textContent = basename(res.path);
+        } else {
+          treeRoot = { path: null, entries: [] };
+        }
+        renderTree();
+      }).catch(function () {
+        treeRoot = { path: null, entries: [] };
+        renderTree();
+        document.getElementById('treeBody').appendChild(el('div', 'tree-error', '加载失败'));
+      });
+    }
+
+    function renderTree() {
+      var bodyEl = document.getElementById('treeBody');
+      bodyEl.textContent = '';
+      if (!treeRoot) return;
+      if (!treeRoot.entries || !treeRoot.entries.length) {
+        bodyEl.appendChild(el('div', 'empty', '（空目录）'));
+        return;
+      }
+      treeRoot.entries.forEach(function (entry) {
+        bodyEl.appendChild(renderTreeNode(entry, 0));
+      });
+    }
+
+    function copyRef(path) {
+      copyText('@' + path, '已复制 @引用');
+    }
+
+    function renderTreeNode(entry, depth) {
+      var wrap = el('div');
+      var isSelected = selectedPath === entry.path;
+      var row = el('div', 'tree-row' + (entry.isDir ? ' tree-dir' : '') + (entry.hidden ? ' tree-hidden' : '') + (isSelected ? ' is-selected' : ''));
+      row.style.paddingLeft = (8 + depth * 20) + 'px';
+      row.title = entry.path;
+
+      row.appendChild(entry.isDir ? (treeExpanded[entry.path] ? folderOpenIcon() : folderClosedIcon()) : fileCodeIcon());
+      row.appendChild(el('span', 'tree-name', entry.name));
+
+      var refBtn = el('button', 'tree-ref', '@引用');
+      refBtn.type = 'button';
+      refBtn.title = '复制 @path 引用';
+      refBtn.addEventListener('click', function (ev) { ev.stopPropagation(); copyRef(entry.path); });
+      row.appendChild(refBtn);
+
+      if (entry.isDir) {
+        row.addEventListener('click', function () { toggleTree(entry.path); });
+      } else {
+        row.addEventListener('click', function () { openPath(entry.path, null); });
+      }
+      wrap.appendChild(row);
+
+      if (entry.isDir && treeExpanded[entry.path]) {
+        var node = treeChildren[entry.path];
+        var childPad = 8 + (depth + 1) * 20 + 20;
+        if (node && node.loading) {
+          var lr = el('div', 'tree-row tree-loading', '加载中…');
+          lr.style.paddingLeft = childPad + 'px';
+          wrap.appendChild(lr);
+        } else if (node && node.error) {
+          var er = el('div', 'tree-row tree-error', node.error);
+          er.style.paddingLeft = childPad + 'px';
+          wrap.appendChild(er);
+        } else if (node && node.entries) {
+          node.entries.forEach(function (c) { wrap.appendChild(renderTreeNode(c, depth + 1)); });
+        }
+      }
+      return wrap;
+    }
+
+    function toggleTree(path) {
+      if (treeExpanded[path]) {
+        treeExpanded[path] = false;
+        renderTree();
+        return;
+      }
+      treeExpanded[path] = true;
+      if (!treeChildren[path]) {
+        treeChildren[path] = { loading: true };
+        renderTree();
+        fetch(LISTDIR_URL + '?path=' + encodeURIComponent(path), { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (res) {
+          treeChildren[path] = res && res.ok ? { entries: res.entries } : { error: (res && res.error) || '读取失败' };
+          renderTree();
+        }).catch(function () {
+          treeChildren[path] = { error: '读取失败' };
+          renderTree();
+        });
+      } else {
+        renderTree();
+      }
+    }
+
+    document.getElementById('tabs').addEventListener('click', function (ev) {
+      var btn = ev.target && ev.target.closest ? ev.target.closest('.tab') : null;
+      if (!btn) return;
+      setView(btn.getAttribute('data-view'));
+    });
+    var treeRefreshBtn = document.getElementById('treeRefresh');
+    if (treeRefreshBtn) {
+      treeRefreshBtn.appendChild(refreshIcon());
+      treeRefreshBtn.addEventListener('click', function () { loadTreeRoot(); });
     }
     function load() {
       var controller = typeof AbortController === 'function' ? new AbortController() : null;
