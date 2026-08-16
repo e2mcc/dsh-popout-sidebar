@@ -218,8 +218,16 @@ html #root {
 body[data-dsh-popout-dragging] #root {
   transition: none;
 }
+/* Reserve right-side clearance in the conversation header so the corner
+   trigger never overlaps its right-aligned utilities (e.g. "Session log").
+   The clearance only applies while the popout panel is closed. */
+header:has([data-slot="conversation.session.header.utilities"]) {
+  padding-right: max(28px, calc(60px - var(--dsh-popout-sidebar-width, 0px)));
+  transition: padding-right var(--ds-transition-duration-slow, 200ms) var(--ds-ease-in-out, ease);
+}
 @media (prefers-reduced-motion: reduce) {
   html #root { transition: none; }
+  header:has([data-slot="conversation.session.header.utilities"]) { transition: none; }
 }
 .artifacts-panel {
   position: fixed; top: 0; right: var(--dsh-sidebar-width, 0px); bottom: 0; width: 30vw; max-width: calc(100vw - 24px); min-width: 0;
