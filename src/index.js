@@ -1,5 +1,5 @@
 /**
- * 具有独立标签页的侧边栏 · Standalone Tab Sidebar — Static host entry
+ * 可弹出侧边栏 · Popout Sidebar — Static host entry
  *
  * Static-bundle entry for the DSH web profile. It evaluates the canonical
  * plugin body in `src/host.js` — the very same text you can pass to
@@ -15,6 +15,6 @@ import { readFileSync } from 'node:fs'
 const makePlugin = new Function(readFileSync(new URL('./host.js', import.meta.url), 'utf8'))
 const plugin = makePlugin()
 
-export const name = 'dsh-standalone-tab-sidebar'
+export const name = 'dsh-popout-sidebar'
 export const inject = plugin.inject ?? []
 export const apply = plugin.apply

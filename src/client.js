@@ -1,8 +1,8 @@
 /**
- * 具有独立标签页的侧边栏 · Standalone Tab Sidebar — Client bundle
+ * 可弹出侧边栏 · Popout Sidebar — Client bundle
  *
  * Static client bundle for the DSH web profile, served by the web app at
- * `/plugins/dsh-standalone-tab-sidebar/client.js` and registered through the
+ * `/plugins/dsh-popout-sidebar/client.js` and registered through the
  * browser `window.__ModuleLoader__`. The `factory` provides the closure
  * symbols the dynamic runner injects (`React`, `styles`, `host`) so the
  * canonical plugin body below works unchanged in both modes: as this bundle,
@@ -17,7 +17,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: 'dsh-standalone-tab-sidebar',
+  id: 'dsh-popout-sidebar',
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports
@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
     const styles = {
       insert(css) {
         if (typeof document === 'undefined') return
-        const id = 'dsh-standalone-tab-sidebar-styles'
+        const id = 'dsh-popout-sidebar-styles'
         if (document.getElementById(id)) return
         const el = document.createElement('style')
         el.id = id
@@ -55,7 +55,7 @@ window.__ModuleLoader__.load({
           const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : ''
           return fetch('/artifacts-panel/listdir?path=' + encodeURIComponent(path) + '&sessionId=' + encodeURIComponent(sessionId)).then((r) => r.json())
         }
-        return Promise.reject(new Error('standalone-tab-sidebar: unknown host method ' + method))
+        return Promise.reject(new Error('dsh-popout-sidebar: unknown host method ' + method))
       },
     }
 
@@ -166,7 +166,7 @@ window.__ModuleLoader__.load({
     }
 
     // Feature settings, persisted in localStorage so they survive reloads.
-    const SETTINGS_KEY = 'dsh-standalone-tab-sidebar:settings'
+    const SETTINGS_KEY = 'dsh-popout-sidebar:settings'
     const DEFAULT_SETTINGS = {
       autoRefresh: true,       // poll the artifact list while the panel is open
       minPanelWidth: 30,       // minimum panel width as % of window width

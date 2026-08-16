@@ -1,7 +1,7 @@
 {
-  "name": "dsh-standalone-tab-sidebar",
+  "name": "dsh-popout-sidebar",
   "version": "1.0.0",
-  "description": "具有独立标签页的侧边栏 · A DeepSeek Harness sidebar that shows artifacts and pops out into a standalone web tab.",
+  "description": "可弹出侧边栏 · A DeepSeek Harness sidebar that shows artifacts and pops out into a larger web tab.",
   "license": "MIT",
   "type": "module",
   "keywords": [

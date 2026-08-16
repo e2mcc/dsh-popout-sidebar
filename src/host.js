@@ -1,5 +1,5 @@
 /**
- * 具有独立标签页的侧边栏 · Standalone Tab Sidebar — Host half
+ * 可弹出侧边栏 · Popout Sidebar — Host half
  *
  * This file is the plain-JavaScript **function body** consumed by DeepSeek
  * Harness's dynamic Cordis plugin loader. Pass this exact text (from the

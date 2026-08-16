@@ -1,8 +1,8 @@
-# 具有独立标签页的侧边栏 · Standalone Tab Sidebar
+# 可弹出侧边栏 · Popout Sidebar
 
-给 [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) Web UI 增加一个展示**产物（artifacts）**的侧边栏，并支持把侧边栏内容弹出为**独立网页标签页**，拖到另一块显示器上观看。
+给 [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) Web UI 增加一个展示**产物（artifacts）**的侧边栏，并支持把侧边栏内容弹出为**更大的网页标签页**，拖到另一块显示器上观看。
 
-> A sidebar for the DeepSeek Harness Web UI that shows the agent's **artifacts** (files created/edited by `write` / `edit`), with the ability to pop the sidebar out into a **standalone web tab** viewable on another monitor.
+> A sidebar for the DeepSeek Harness Web UI that shows the agent's **artifacts** (files created/edited by `write` / `edit`), with the ability to pop the sidebar out into a **larger web tab** viewable on another monitor.
 
 ## 特性 / Features
 
@@ -52,7 +52,7 @@
 前置：DSH 已装好（`dsh web` 能正常运行）。
 
 ```sh
-dsh plugin --profile web add /绝对路径/dsh-standalone-tab-sidebar
+dsh plugin --profile web add /绝对路径/dsh-popout-sidebar
 ```
 
 装完**重启 DSH 服务**（host 半加载）并**硬刷新浏览器**（Cmd/Ctrl+Shift+R），会话顶部最右侧即出现「产物」按钮。
@@ -83,7 +83,7 @@ dsh plugin --profile web add /绝对路径/dsh-standalone-tab-sidebar
 
 > 顶部「产物」按钮、独立标签页按钮（↗）、以及「自动让位到其他侧边栏左侧」均为常驻行为，无需开关。
 
-设置保存在浏览器 `localStorage`（键 `dsh-standalone-tab-sidebar:settings`），刷新后仍然生效。
+设置保存在浏览器 `localStorage`（键 `dsh-popout-sidebar:settings`），刷新后仍然生效。
 
 ## 主题 / Theming
 
