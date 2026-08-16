@@ -216,6 +216,20 @@ window.__ModuleLoader__.load({
     }
 
     styles.insert(`
+/* Layout push: reserve space for the popout panel so the conversation column
+   yields instead of being covered (same technique as better-sidebar's right
+   panel). --dsh-popout-sidebar-width is set live by the panel component;
+   --dsh-sidebar-width is better-sidebar's right panel. */
+html #root {
+  margin-right: calc(var(--dsh-sidebar-width, 0px) + var(--dsh-popout-sidebar-width, 0px));
+  transition: margin-right var(--ds-transition-duration-slow, 200ms) var(--ds-ease-in-out, ease);
+}
+body[data-dsh-popout-dragging] #root {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  html #root { transition: none; }
+}
 .artifacts-panel {
   position: fixed; top: 0; right: var(--dsh-sidebar-width, 0px); bottom: 0; width: 30vw; max-width: calc(100vw - 24px); min-width: 0;
   display: flex; flex-direction: column;
@@ -678,15 +692,32 @@ window.__ModuleLoader__.load({
         return () => { alive = false; if (dispose) dispose() }
       }, [open, settings.autoRefresh])
 
+      // Panel width (px): at least `minPanelWidth`% of the window, wider via
+      // dragging the left edge. `panelWidth` holds the drag result (px); null →
+      // use the configured minimum.
+      const minWidthPx = Math.max(80, Math.round(window.innerWidth * (settings.minPanelWidth || 0) / 100))
+      const widthPx = panelWidth != null ? Math.max(panelWidth, minWidthPx) : minWidthPx
+
+      // Reserve layout space for the panel while open: shrink the app frame by
+      // the panel's live width so the conversation column yields instead of
+      // being covered (see the `html #root` rule in styles).
+      React.useEffect(() => {
+        const root = document.documentElement
+        root.style.setProperty('--dsh-popout-sidebar-width', open ? widthPx + 'px' : '0px')
+        return () => { root.style.setProperty('--dsh-popout-sidebar-width', '0px') }
+      }, [open, widthPx])
+
+      // Disable the layout transition while dragging so the frame tracks the
+      // pointer instead of lagging (mirrors body[data-dsh-popout-dragging]).
+      React.useEffect(() => {
+        if (resizing) document.body.setAttribute('data-dsh-popout-dragging', '')
+        else document.body.removeAttribute('data-dsh-popout-dragging')
+        return () => { document.body.removeAttribute('data-dsh-popout-dragging') }
+      }, [resizing])
+
       if (!open) return null
 
       const popoutHref = '/artifacts-panel?scheme=' + popoutScheme()
-
-      // Panel width: at least `minPanelWidth`% of the window, wider via dragging
-      // the left edge. `panelWidth` holds the drag result (px); null → use the
-      // configured minimum.
-      const minWidthPx = Math.max(80, Math.round(window.innerWidth * (settings.minPanelWidth || 0) / 100))
-      const widthPx = panelWidth != null ? Math.max(panelWidth, minWidthPx) : minWidthPx
 
       const startResize = (e) => {
         e.preventDefault()
