@@ -921,7 +921,7 @@ window.__ModuleLoader__.load({
       const set = (key, value) => settingsStore.set(key, value)
 
       return React.createElement('div', { className: 'artifacts-settings' },
-        React.createElement('p', { className: 'artifacts-setintro' }, '管理「单页侧卡」的显示与行为。'),
+        React.createElement('p', { className: 'artifacts-setintro' }, '管理「Popout Sidebar」的显示与行为。'),
         React.createElement('div', { className: 'artifacts-setgroup' },
           React.createElement(SettingsToggle, {
             label: '自动刷新',
@@ -971,7 +971,7 @@ window.__ModuleLoader__.load({
     ))
 
     slots.inject('settings.section', () => slots.register(
-      { name: 'settings.section', id: 'artifacts-sidebar', order: 90, label: '单页侧卡' },
+      { name: 'settings.section', id: 'artifacts-sidebar', order: 90, label: 'Popout Sidebar' },
       SettingsSection,
     ))
   },
