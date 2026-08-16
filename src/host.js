@@ -143,20 +143,31 @@ return {
     // When the client does not supply a session id (the standalone tab is a
     // separate page with no client store), pick the most recently created live
     // session's working directory.
-    const defaultSessionCwd = () => {
+    const defaultSessionCwd = async () => {
       try {
         const sessions = ctx.get('sessions')
-        if (sessions && typeof sessions.list === 'function') {
-          const live = sessions.list()
-          let best
-          let bestAt = -1
-          for (let i = 0; i < live.length; i += 1) {
-            const s = live[i]
-            const c = s && s.header && typeof s.header.cwd === 'string' && s.header.cwd ? s.header.cwd : undefined
-            const at = s && s.header && typeof s.header.createdAt === 'number' ? s.header.createdAt : 0
-            if (c && at > bestAt) { best = c; bestAt = at }
+        if (!sessions || typeof sessions.list !== 'function') return undefined
+        const live = sessions.list()
+        const cands = []
+        for (let i = 0; i < live.length; i += 1) {
+          const s = live[i]
+          const c = s && s.header && typeof s.header.cwd === 'string' && s.header.cwd ? s.header.cwd : undefined
+          const at = s && s.header && typeof s.header.createdAt === 'number' ? s.header.createdAt : 0
+          if (c) cands.push({ cwd: c, at: at })
+        }
+        cands.sort((a, b) => b.at - a.at)
+        const fs = ctx.get('fs')
+        for (let i = 0; i < cands.length; i += 1) {
+          const c = cands[i].cwd
+          if (!fs || typeof fs.stat !== 'function' || typeof fs.resolve !== 'function') return c
+          try {
+            const target = await fs.resolve(c)
+            const info = await fs.stat(target)
+            if (info && info.type === 'directory') return c
+          } catch (e) {
+            // Directory missing (e.g. the workspace was renamed or deleted);
+            // skip this stale candidate and fall through to the next one.
           }
-          if (best) return best
         }
       } catch (e) {}
       return undefined
@@ -170,7 +181,11 @@ return {
       try {
         const policy = ctx.get('sandboxPolicy')
         const policyRoot = policy && typeof policy.workspaceRoot === 'string' ? policy.workspaceRoot : undefined
-        const cwd = sessionCwd(sessionId) || defaultSessionCwd() || (typeof lastCwd === 'string' && lastCwd) || policyRoot
+        // `sessionCwd(sessionId)` wins when the client names a session (the
+        // in-page sidebar does); the standalone tab passes no session id, so
+        // it falls through to defaultSessionCwd() — which must skip stale
+        // sessions whose cwd no longer exists (e.g. after a workspace rename).
+        const cwd = sessionCwd(sessionId) || (await defaultSessionCwd()) || (typeof lastCwd === 'string' && lastCwd) || policyRoot
         let p = path
         if (typeof p !== 'string' || !p) {
           if (!cwd) return { ok: false, error: 'missing path' }
