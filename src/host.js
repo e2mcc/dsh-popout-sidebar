@@ -209,7 +209,7 @@ return {
 
     // Package-private RPC (dynamic-plugin transport). Guarded so the same body
     // also runs as a static bundle (no `harness` global there); the static
-    // client talks to the /artifacts-panel/* HTTP routes below instead.
+    // client talks to the /popout-sidebar/* HTTP routes below instead.
     if (typeof harness !== 'undefined') {
       harness.handle('artifacts.list', () => ({ artifacts: snapshot() }))
       harness.handle('artifacts.remove', (args) => removeFile(args && args.path))
@@ -224,11 +224,11 @@ return {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Artifacts · 产物</title>
+<title>弹出式侧边栏</title>
 <script>
   (function () {
     var m = /[?&]scheme=([^&]+)/.exec(location.search);
-    var scheme = m ? m[1] : 'dark';
+    var scheme = m ? m[1] : 'light';
     if (scheme === 'dark') document.documentElement.setAttribute('data-ds-dark-theme', '');
   })();
 </script>
@@ -284,11 +284,11 @@ return {
   }
   header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--p-border-l2); background: var(--p-bg-layer-1); flex: none; }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  header .count { color: var(--p-text-caption); font-size: 12px; }
   header .spacer { flex: 1; }
   header .status { font-size: 12px; color: var(--p-success-fg); }
   main { flex: 1; display: flex; min-height: 0; }
-  .list { width: 340px; flex: none; overflow-y: auto; border-right: 1px solid var(--p-border-l2); }
+  .sidebar { width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--p-border-l2); }
+  .list { flex: 1; min-height: 0; overflow-y: auto; }
   .list .empty { padding: 32px 20px; color: var(--p-text-tertiary); text-align: center; }
   .item { display: flex; align-items: stretch; border-bottom: 1px solid var(--p-border-l1); }
   .item.active { background: var(--p-hover); }
@@ -336,11 +336,11 @@ return {
   .diff-block.add .diff-pre { background: rgba(34,197,94,0.06); }
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--p-bg-layer-1); border: 1px solid var(--p-border-l2); color: var(--p-text); padding: 6px 14px; border-radius: 8px; font-size: 12px; opacity: 0; transition: opacity .18s; pointer-events: none; box-shadow: var(--p-shadow); z-index: 10; }
   .tabs { display: flex; align-items: stretch; height: 34px; border-bottom: 1px solid var(--p-border-l2); background: var(--p-bg-layer-1); flex: none; }
-  .tab { flex: 1; border: none; background: transparent; color: var(--p-text-secondary); font: inherit; font-size: 12px; cursor: pointer; border-right: 1px solid var(--p-border-l1); }
+  .tab { flex: 1; border: none; background: var(--p-hover); color: var(--p-text-tertiary); font: inherit; font-size: 12px; cursor: pointer; border-right: 1px solid var(--p-border-l1); }
   .tab:hover { background: var(--p-hover); }
-  .tab.is-active { color: var(--p-text); background: var(--p-hover); }
+  .tab.is-active { color: var(--p-text); background: transparent; }
   .list.is-hidden { display: none; }
-  .tree { width: 340px; flex: none; display: none; flex-direction: column; border-right: 1px solid var(--p-border-l2); }
+  .tree { flex: 1; min-height: 0; display: none; flex-direction: column; }
   .tree.is-active { display: flex; }
   .tree-head { flex: none; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--p-border-l2); }
   .tree-root { flex: 1; min-width: 0; color: var(--p-text-secondary); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -364,23 +364,24 @@ return {
 </head>
 <body>
   <header>
-    <h1>Artifacts · 产物</h1>
-    <span class="count" id="count">0</span>
+    <h1>弹出式侧边栏</h1>
     <span class="spacer"></span>
     <span class="status" id="status">connecting…</span>
   </header>
-  <div class="tabs" id="tabs">
-    <button class="tab is-active" data-view="artifacts">产物</button>
-    <button class="tab" data-view="tree">文件树</button>
-  </div>
   <main>
-    <div class="list" id="list"></div>
-    <div class="tree" id="tree">
-      <div class="tree-head">
-        <span class="tree-root" id="treeRoot">…</span>
-        <button class="tree-refresh" id="treeRefresh" title="刷新" type="button"></button>
+    <div class="sidebar">
+      <div class="tabs" id="tabs">
+        <button class="tab is-active" data-view="artifacts">产物</button>
+        <button class="tab" data-view="tree">文件树</button>
       </div>
-      <div class="tree-body" id="treeBody"></div>
+      <div class="list" id="list"></div>
+      <div class="tree" id="tree">
+        <div class="tree-head">
+          <span class="tree-root" id="treeRoot">…</span>
+          <button class="tree-refresh" id="treeRefresh" title="刷新" type="button"></button>
+        </div>
+        <div class="tree-body" id="treeBody"></div>
+      </div>
     </div>
     <div class="preview">
       <div class="bar" id="bar"><span class="path">Select a file to preview</span></div>
@@ -389,10 +390,10 @@ return {
   </main>
   <div class="toast" id="toast"></div>
   <script>
-    var DATA_URL = '/artifacts-panel/data';
-    var CONTENT_URL = '/artifacts-panel/content';
-    var MEDIA_URL = '/artifacts-panel/media';
-    var LISTDIR_URL = '/artifacts-panel/listdir';
+    var DATA_URL = '/popout-sidebar/data';
+    var CONTENT_URL = '/popout-sidebar/content';
+    var MEDIA_URL = '/popout-sidebar/media';
+    var LISTDIR_URL = '/popout-sidebar/listdir';
     var items = [];
     var selectedPath = null;
     var selectedItem = null;
@@ -557,9 +558,7 @@ return {
     }
     function render() {
       var list = document.getElementById('list');
-      var count = document.getElementById('count');
       list.textContent = '';
-      count.textContent = String(items.length);
       if (!items.length) {
         list.appendChild(el('div', 'empty', 'No artifacts yet — files created/edited by the agent will appear here.'));
         return;
@@ -806,7 +805,7 @@ return {
 
       ctx.effect(() => webServer.register({
         kind: 'exact',
-        path: '/artifacts-panel',
+        path: '/popout-sidebar',
         handler(req, res) {
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
           res.end(page)
@@ -814,7 +813,7 @@ return {
       }), 'artifacts: page route')
       ctx.effect(() => webServer.register({
         kind: 'exact',
-        path: '/artifacts-panel/data',
+        path: '/popout-sidebar/data',
         handler(req, res) {
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Connection': 'close' })
           res.end(JSON.stringify({ artifacts: snapshot() }))
@@ -822,7 +821,7 @@ return {
       }), 'artifacts: data route')
       ctx.effect(() => webServer.register({
         kind: 'exact',
-        path: '/artifacts-panel/content',
+        path: '/popout-sidebar/content',
         handler: async (req, res) => {
           const qs = (req.url || '').split('?')[1] || ''
           let path = ''
@@ -840,7 +839,7 @@ return {
       }), 'artifacts: content route')
       ctx.effect(() => webServer.register({
         kind: 'exact',
-        path: '/artifacts-panel/media',
+        path: '/popout-sidebar/media',
         handler: async (req, res) => {
           const qs = (req.url || '').split('?')[1] || ''
           let path = ''
@@ -880,7 +879,7 @@ return {
       }), 'artifacts: media route')
       ctx.effect(() => webServer.register({
         kind: 'exact',
-        path: '/artifacts-panel/remove',
+        path: '/popout-sidebar/remove',
         handler(req, res) {
           const qs = (req.url || '').split('?')[1] || ''
           let path = ''
@@ -898,7 +897,7 @@ return {
       }), 'artifacts: remove route')
       ctx.effect(() => webServer.register({
         kind: 'exact',
-        path: '/artifacts-panel/listdir',
+        path: '/popout-sidebar/listdir',
         handler: async (req, res) => {
           const qs = (req.url || '').split('?')[1] || ''
           let path = ''

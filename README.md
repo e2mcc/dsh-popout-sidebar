@@ -11,21 +11,21 @@
 - 👀 **多类型预览**：按文件类型预览——纯文本 / Markdown 渲染 / 图片 / HTML（沙箱 iframe），超长内容自动截断。
 - 📝 **编辑差异**：`edit` 修改过的文件在预览里展示「删除 / 新增」的改动片段对比。
 - 🔗 **复制 / 引用**：一键复制文件路径，或把 `@path` 引用写入会话输入框（悬浮在列表行）。
-- ↗️ **独立标签页**：一键把侧边栏弹出为独立网页标签页（`/artifacts-panel`），每 1.5s 自动刷新，可拖到另一块显示器。
+- ↗️ **独立标签页**：一键把侧边栏弹出为独立网页标签页（`/popout-sidebar`），每 1.5s 自动刷新，可拖到另一块显示器。
 - 🎨 **主题一致**：面板与标签页都跟随主界面浅色 / 深色主题（使用 `--dsw-alias-*` 主题变量）。
 - 🧭 **与其他 sidebar 兼容**：当其他的「侧边卡片」打开时，本侧边栏自动让位到其左侧，两者同时可见。
 - ⚙️ **设置面板**：在 DSH 设置里新增「Popout Sidebar」选项卡，可开关自动刷新、设置最短面板宽度（存于 `localStorage`）；面板更宽可通过拖动左边缘调整。
-- 🗑 **删除模式**：面板右上角进入删除模式后，点击产物将其标红（红框），再点红色 × 删除该产物；删除仅移除列表条目，不动磁盘文件。
-- ✖️ **关闭**：面板右上角一键关闭面板。
+- 🗑 **清除模式**：面板右上角进入清除模式后，点击产物将其标红（红框），再点红色 × 清除该产物；清除仅移除列表条目，不动磁盘文件。
+- ✖️ **关闭**：点击右上角的「产物」图标按钮即可收起面板。
 
 ## 工作原理 / How it works
 
 - **Host（Node 进程）**
   - 监听 `tools/result` 事件，追踪 `write` / `edit` 的成功调用并提取 `file_path`（`edit` 额外记录 `old_string`/`new_string` 改动片段，并按扩展名标注预览类型）。
   - 通过 `harness.handle` 暴露包私有 RPC：`artifacts.list`、`artifacts.read`、`artifacts.remove`、`artifacts.listDir`。
-  - 通过 `webServer.register` 提供路由：`/artifacts-panel`（页面）、`/artifacts-panel/data`（JSON）、`/artifacts-panel/content`（文本预览）、`/artifacts-panel/media`（二进制图片）、`/artifacts-panel/remove`（删除单条产物）、`/artifacts-panel/listdir`（目录列表）。
+  - 通过 `webServer.register` 提供路由：`/popout-sidebar`（页面）、`/popout-sidebar/data`（JSON）、`/popout-sidebar/content`（文本预览）、`/popout-sidebar/media`（二进制图片）、`/popout-sidebar/remove`（删除单条产物）、`/popout-sidebar/listdir`（目录列表）。
 - **Client（浏览器）**
-  - 在 `conversation.session.header.utilities` 注册「产物」按钮（顶部最右侧）。
+  - 在 `shell.overlay`（root 作用域）注册一个固定于**右上角**的常驻「产物」图标按钮，无会话时依然可见；按钮仅含图标（方框 + 右侧竖线 + 弹出箭头），不含文字。
   - 在 `shell.overlay` 渲染浮动侧边栏面板。
   - 通过 `host.call` 拉取数据，并读取当前主题把 `scheme` 传给独立标签页。
 
@@ -55,7 +55,7 @@
 dsh plugin --profile web add /绝对路径/dsh-popout-sidebar
 ```
 
-装完**重启 DSH 服务**（host 半加载）并**硬刷新浏览器**（Cmd/Ctrl+Shift+R），会话顶部最右侧即出现「产物」按钮。
+装完**重启 DSH 服务**（host 半加载）并**硬刷新浏览器**（Cmd/Ctrl+Shift+R），界面**右上角**即出现常驻的「产物」图标按钮（无会话时依然可见）。
 
 - 包内 `cordis.patch.yml`（`dsh.bundle.patch`）让 CLI 自动把它挂进 `dsh.profile.bundles`；
 - client 半由 `package.json` 的 `dsh.client.platform: "web"` + `exports["./client"]` 自动发现并加载；
@@ -69,7 +69,7 @@ dsh plugin --profile web add /绝对路径/dsh-popout-sidebar
 2. 调用 `cordis_run` 激活返回的 `pluginId` / `packageId`。
 3. 点击「产物」按钮；点面板右上角 ↗ 打开独立标签页。
 
-> 两种模式下 host 与 client 都通过 `/artifacts-panel/*` HTTP 路由通信（动态模式另保留 `harness.handle` RPC 兼容），因此行为一致。
+> 两种模式下 host 与 client 都通过 `/popout-sidebar/*` HTTP 路由通信（动态模式另保留 `harness.handle` RPC 兼容），因此行为一致。
 
 ## 设置 / Settings
 
@@ -81,14 +81,14 @@ dsh plugin --profile web add /绝对路径/dsh-popout-sidebar
 | 文件树 | 开 | 在侧边栏显示「文件树」标签页，浏览工作区目录 |
 | 最短面板宽度 | 30% | 面板最小宽度（占窗口宽度的百分比，20–60%）；更宽可通过拖动面板左边缘调整 |
 
-> 顶部「产物」按钮、独立标签页按钮（↗）、以及「自动让位到其他侧边栏左侧」均为常驻行为，无需开关。
+> 右上角的「产物」图标按钮、独立标签页按钮（↗）、以及「自动让位到其他侧边栏左侧」均为常驻行为，无需开关。
 
 设置保存在浏览器 `localStorage`（键 `dsh-popout-sidebar:settings`），刷新后仍然生效。
 
 ## 主题 / Theming
 
 面板与标签页使用与主界面相同的主题色值（来自 `@deepseek-ai/dsh-client-ui-theme` 的 `design-platform.css`）。
-标签页通过 `?scheme=dark|light` 参数跟随主界面当前配色方案。
+标签页默认使用浅色（light）配色；如需深色可手动在地址后加 `?scheme=dark`。
 
 ## License
 

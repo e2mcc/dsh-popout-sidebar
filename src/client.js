@@ -13,7 +13,7 @@
  *  - Register the「产物」trigger button in `conversation.session.header.utilities`.
  *  - Render the floating sidebar panel in `shell.overlay`.
  *  - Pull data from the Host through the `host.call` façade below, which maps
- *    the dynamic RPC methods onto the host's `/artifacts-panel/*` routes.
+ *    the dynamic RPC methods onto the host's `/popout-sidebar/*` routes.
  */
 
 window.__ModuleLoader__.load({
@@ -40,20 +40,20 @@ window.__ModuleLoader__.load({
     const host = {
       call(method, args) {
         if (method === 'artifacts.list') {
-          return fetch('/artifacts-panel/data').then((r) => r.json())
+          return fetch('/popout-sidebar/data').then((r) => r.json())
         }
         if (method === 'artifacts.read') {
           const path = args && typeof args.path === 'string' ? args.path : ''
-          return fetch('/artifacts-panel/content?path=' + encodeURIComponent(path)).then((r) => r.json())
+          return fetch('/popout-sidebar/content?path=' + encodeURIComponent(path)).then((r) => r.json())
         }
         if (method === 'artifacts.remove') {
           const path = args && typeof args.path === 'string' ? args.path : ''
-          return fetch('/artifacts-panel/remove?path=' + encodeURIComponent(path), { method: 'POST' }).then((r) => r.json())
+          return fetch('/popout-sidebar/remove?path=' + encodeURIComponent(path), { method: 'POST' }).then((r) => r.json())
         }
         if (method === 'artifacts.listDir') {
           const path = args && typeof args.path === 'string' ? args.path : ''
           const sessionId = args && typeof args.sessionId === 'string' ? args.sessionId : ''
-          return fetch('/artifacts-panel/listdir?path=' + encodeURIComponent(path) + '&sessionId=' + encodeURIComponent(sessionId)).then((r) => r.json())
+          return fetch('/popout-sidebar/listdir?path=' + encodeURIComponent(path) + '&sessionId=' + encodeURIComponent(sessionId)).then((r) => r.json())
         }
         return Promise.reject(new Error('dsh-popout-sidebar: unknown host method ' + method))
       },
@@ -206,15 +206,6 @@ window.__ModuleLoader__.load({
       return s
     }
 
-    const popoutScheme = () => {
-      const theme = ctx.get('theme')
-      if (theme && theme.getTheme) {
-        const snap = theme.getTheme()
-        if (snap && snap.active && snap.active.colorScheme) return snap.active.colorScheme
-      }
-      return 'dark'
-    }
-
     styles.insert(`
 /* Layout push: reserve space for the popout panel so the conversation column
    yields instead of being covered (same technique as better-sidebar's right
@@ -244,13 +235,19 @@ body[data-dsh-popout-dragging] #root {
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 .artifacts-head {
-  display: flex; align-items: center; gap: 8px; padding: 10px 12px; flex: none;
+  position: relative; display: flex; align-items: center; gap: 8px; padding: 10px 12px; flex: none;
   border-bottom: 1px solid var(--dsw-alias-border-l2);
   background: var(--dsw-alias-bg-layer-1);
 }
-.artifacts-title { font-weight: 600; font-size: 13px; color: var(--dsw-alias-label-primary); }
-.artifacts-count { color: var(--dsw-alias-label-caption); font-size: 12px; }
+.artifacts-head-left { display: flex; align-items: center; gap: 4px; flex: none; }
+.artifacts-title { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); white-space: nowrap; font-weight: 600; font-size: 13px; color: var(--dsw-alias-label-primary); }
 .artifacts-spacer { flex: 1; }
+.artifacts-toggle {
+  display: inline-flex; align-items: center; justify-content: center; padding: 4px; line-height: 0;
+  border: none; background: transparent; border-radius: 6px;
+  color: var(--dsw-alias-label-secondary); cursor: pointer;
+}
+.artifacts-toggle:hover { color: var(--dsw-alias-label-primary); }
 .artifacts-link { color: var(--dsw-alias-state-business-primary); text-decoration: none; font-size: 15px; padding: 2px 8px; border-radius: 6px; }
 .artifacts-link:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .artifacts-iconbtn {
@@ -286,15 +283,14 @@ body[data-dsh-popout-dragging] #root {
 }
 .artifacts-hint { padding: 24px 16px; color: var(--dsw-alias-label-tertiary); text-align: center; }
 .artifacts-error { padding: 16px; color: var(--dsw-alias-state-error-primary); font-family: var(--dsh-font-mono, monospace); word-break: break-all; }
-.artifacts-headbtn {
-  border: 1px solid var(--dsw-alias-border-l2);
-  height: 32px; color: var(--dsw-alias-label-primary);
-  font-family: var(--dsw-font-family); cursor: pointer; background: transparent;
-  border-radius: 18px; align-items: center; gap: 4px; padding: 6px 12px;
-  font-size: 13px; line-height: 20px; display: inline-flex;
+.artifacts-corner-btn {
+  position: fixed; top: 10px; right: calc(var(--dsh-sidebar-width, 0px) + var(--dsh-popout-sidebar-width, 0px) + 12px);
+  z-index: 10000; width: 36px; height: 36px; padding: 0;
+  border: none; background: transparent; color: var(--dsw-alias-label-secondary);
+  cursor: pointer; align-items: center; justify-content: center; display: inline-flex;
+  transition: right var(--ds-transition-duration-slow, 200ms) var(--ds-ease-in-out, ease), color .15s;
 }
-.artifacts-headbtn:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.artifacts-headbtn.is-open { color: var(--dsw-alias-state-business-primary); border-color: var(--dsw-alias-state-business-primary); }
+.artifacts-corner-btn:hover { color: var(--dsw-alias-label-primary); }
 .artifacts-item { display: flex; align-items: stretch; padding: 0; cursor: default; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .artifacts-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .artifacts-item.is-active { background: var(--dsw-alias-interactive-bg-hover); }
@@ -342,9 +338,9 @@ body[data-dsh-popout-dragging] #root {
 
 /* Tabs (产物 / 文件树) */
 .artifacts-tabs { flex: none; display: flex; align-items: stretch; height: 32px; border-bottom: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); }
-.artifacts-tab { flex: 1; border: none; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; cursor: pointer; border-right: 1px solid var(--dsw-alias-border-l1); }
-.artifacts-tab:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.artifacts-tab.is-active { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-active); }
+.artifacts-tab { flex: 1; border: none; background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 12px; cursor: pointer; border-right: 1px solid var(--dsw-alias-border-l1); }
+.artifacts-tab:hover { background: var(--dsw-alias-interactive-bg-hover-accent); }
+.artifacts-tab.is-active { color: var(--dsw-alias-label-primary); background: transparent; }
 
 /* File tree (文件树) — styled like better-sidebar's explorer */
 .artifacts-tree { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -397,11 +393,19 @@ body[data-dsh-popout-dragging] #root {
 .artifacts-delete-x:hover { background: rgba(236,19,19,0.12); color: var(--dsw-alias-state-error-primary); }
 `)
 
-    const PANEL_PATH = 'M9.67272 0.522841C10.8339 0.522841 11.76 0.522714 12.4963 0.602493C13.2453 0.683657 13.8789 0.854248 14.4264 1.25197C14.7504 1.48739 15.0355 1.77247 15.2709 2.0965C15.6686 2.64394 15.8392 3.27758 15.9204 4.02655C16.0002 4.7629 16 5.68895 16 6.85014V9.14986C16 10.3111 16.0002 11.2371 15.9204 11.9735C15.8392 12.7224 15.6686 13.3561 15.2709 13.9035C15.0355 14.2275 14.7504 14.5126 14.4264 14.748C13.8789 15.1458 13.2453 15.3163 12.4963 15.3975C11.76 15.4773 10.8339 15.4772 9.67272 15.4772H6.3273C5.16611 15.4772 4.24006 15.4773 3.50371 15.3975C2.75474 15.3163 2.1211 15.1458 1.57366 14.748C1.24963 14.5126 0.964549 14.2275 0.729131 13.9035C0.331407 13.3561 0.160817 12.7224 0.0796529 11.9735C-0.000126137 11.2371 1.25338e-09 10.3111 1.25338e-09 9.14986V6.85014C1.25329e-09 5.68895 -0.000126137 4.7629 0.0796529 4.02655C0.160817 3.27758 0.331407 2.64394 0.729131 2.0965C0.964549 1.77247 1.24963 1.48739 1.57366 1.25197C2.1211 0.854248 2.75474 0.683657 3.50371 0.602493C4.24006 0.522714 5.16611 0.522841 6.3273 0.522841H9.67272ZM5.54303 1.88715V14.1118C5.78636 14.1128 6.04709 14.1169 6.3273 14.1169H9.67272C10.8639 14.1169 11.7032 14.1164 12.3493 14.0465C12.9824 13.9779 13.3497 13.8494 13.6268 13.6482C13.8354 13.4966 14.0195 13.3125 14.1711 13.1039C14.3723 12.8268 14.5007 12.4595 14.5693 11.8264C14.6393 11.1803 14.6398 10.341 14.6398 9.14986V6.85014C14.6398 5.65896 14.6393 4.81967 14.5693 4.1736C14.5007 3.54048 14.3723 3.17318 14.1711 2.89609C14.0195 2.68747 13.8354 2.50337 13.6268 2.35179C13.3497 2.1506 12.9824 2.02212 12.3493 1.95353C11.7032 1.88358 10.8639 1.88307 9.67272 1.88307H6.3273C6.04709 1.88307 5.78636 1.8862 5.54303 1.88715ZM4.1828 1.91166C3.99125 1.9216 3.8148 1.93577 3.65076 1.95353C3.01764 2.02212 2.65034 2.1506 2.37325 2.35179C2.16463 2.50337 1.98052 2.68747 1.82895 2.89609C1.62776 3.17318 1.49928 3.54048 1.43069 4.1736C1.36074 4.81967 1.36023 5.65896 1.36023 6.85014V9.14986C1.36023 10.341 1.36074 11.1803 1.43069 11.8264C1.49928 12.4595 1.62776 12.8268 1.82895 13.1039C1.98052 13.3125 2.16463 13.4966 2.37325 13.6482C2.65034 13.8494 3.01764 13.9779 3.65076 14.0465C3.81478 14.0642 3.99127 14.0774 4.1828 14.0873V1.91166Z'
-
     const PanelIcon = (size) => React.createElement('svg', {
       width: size, height: size, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
-    }, React.createElement('path', { fillRule: 'evenodd', clipRule: 'evenodd', d: PANEL_PATH, fill: 'currentColor' }))
+    },
+      // Box (rounded rect outline), mirroring the main sidebar toggle icon.
+      React.createElement('rect', { x: 1.5, y: 1.5, width: 13, height: 13, rx: 2.8, stroke: 'currentColor', strokeWidth: 1.5 }),
+      // Divider line at the right third (mirror of the sidebar's left divider).
+      React.createElement('line', { x1: 10.2, y1: 2.6, x2: 10.2, y2: 13.4, stroke: 'currentColor', strokeWidth: 1.5 }),
+      // Pop-out arrow (↖) inside the left region.
+      React.createElement('path', {
+        d: 'M7.5 9.5 L4.5 6.5 M4.5 6.5 L6.2 6.5 M4.5 6.5 L4.5 8.2',
+        stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none',
+      }),
+    )
 
     const mdEscape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
     const mdInline = (s) => {
@@ -477,7 +481,7 @@ body[data-dsh-popout-dragging] #root {
       if (type === 'image') {
         body.push(React.createElement('img', {
           key: 'img', className: 'artifacts-img',
-          src: '/artifacts-panel/media?path=' + encodeURIComponent(p.path || ''),
+          src: '/popout-sidebar/media?path=' + encodeURIComponent(p.path || ''),
           alt: p.path || '',
         }))
       } else if (type === 'html') {
@@ -717,7 +721,7 @@ body[data-dsh-popout-dragging] #root {
 
       if (!open) return null
 
-      const popoutHref = '/artifacts-panel?scheme=' + popoutScheme()
+      const popoutHref = '/popout-sidebar'
 
       const startResize = (e) => {
         e.preventDefault()
@@ -783,11 +787,11 @@ body[data-dsh-popout-dragging] #root {
             setItems((prev) => prev.filter((x) => x.path !== path))
             if (preview && preview.path === path) setPreview(null)
             setDeleteTarget(null)
-            flash('已删除')
+            flash('已清除')
           } else {
-            flash((res && res.error) || '删除失败')
+            flash((res && res.error) || '清除失败')
           }
-        }).catch(() => flash('删除失败'))
+        }).catch(() => flash('清除失败'))
       }
 
       const openFile = (path, diff) => {
@@ -837,7 +841,7 @@ body[data-dsh-popout-dragging] #root {
             isDeleteMarked ? React.createElement('button', {
               type: 'button',
               className: 'artifacts-minibtn artifacts-delete-x',
-              title: '删除该产物',
+              title: '清除该产物',
               onClick: () => remove(it.path),
             }, '×') : null,
             deleteMode ? null : React.createElement('button', { type: 'button', className: 'artifacts-minibtn', title: '复制路径', onClick: () => copyText(it.path, '已复制路径') }, '⧉'),
@@ -857,24 +861,30 @@ body[data-dsh-popout-dragging] #root {
           onMouseDown: startResize,
         }),
         React.createElement('div', { className: 'artifacts-head' },
-          React.createElement('span', { className: 'artifacts-title' }, '产物 Artifacts'),
-          React.createElement('span', { className: 'artifacts-count' }, String(items.length)),
-          notice ? React.createElement('span', { className: 'artifacts-notice' }, notice) : null,
+          React.createElement('div', { className: 'artifacts-head-left' },
+            React.createElement('button', {
+              type: 'button',
+              className: 'artifacts-toggle',
+              title: '收起侧边栏',
+              onClick: () => store.setOpen(false),
+            }, PanelIcon(16)),
+            React.createElement('a', {
+              className: 'artifacts-link',
+              href: popoutHref,
+              target: '_blank',
+              rel: 'noreferrer noopener',
+              title: '在新标签页打开（可拖到另一块显示器）',
+            }, '↖'),
+          ),
+          React.createElement('span', { className: 'artifacts-title' }, '弹出式侧边栏'),
           React.createElement('span', { className: 'artifacts-spacer' }),
-          React.createElement('a', {
-            className: 'artifacts-link',
-            href: popoutHref,
-            target: '_blank',
-            rel: 'noreferrer noopener',
-            title: '在新标签页打开（可拖到另一块显示器）',
-          }, '↗'),
-          React.createElement('button', {
+          notice ? React.createElement('span', { className: 'artifacts-notice' }, notice) : null,
+          activeView === 'artifacts' ? React.createElement('button', {
             type: 'button',
             className: 'artifacts-iconbtn' + (deleteMode ? ' artifacts-delete-on' : ''),
-            title: deleteMode ? '退出删除模式' : '删除模式',
+            title: deleteMode ? '退出清除模式' : '清除模式',
             onClick: () => { setDeleteMode(!deleteMode); setDeleteTarget(null) },
-          }, '删除'),
-          React.createElement('button', { type: 'button', className: 'artifacts-iconbtn', title: '关闭', onClick: () => store.setOpen(false) }, '×'),
+          }, '清除') : null,
         ),
         settings.showFileTree ? React.createElement('div', { className: 'artifacts-tabs' },
           React.createElement('button', {
@@ -885,7 +895,7 @@ body[data-dsh-popout-dragging] #root {
           React.createElement('button', {
             type: 'button',
             className: 'artifacts-tab' + (activeView === 'tree' ? ' is-active' : ''),
-            onClick: () => setActiveView('tree'),
+            onClick: () => { setActiveView('tree'); setDeleteMode(false); setDeleteTarget(null) },
           }, '文件树'),
         ) : null,
         React.createElement('div', {
@@ -896,7 +906,7 @@ body[data-dsh-popout-dragging] #root {
           (activeView === 'tree' && settings.showFileTree)
             ? React.createElement(FileTree, { onOpen: openFile, selectedPath: preview ? preview.path : null })
             : [
-                deleteMode ? React.createElement('div', { className: 'artifacts-delete-hint' }, '删除模式：点击产物标记，再点红色 × 删除') : null,
+                deleteMode ? React.createElement('div', { className: 'artifacts-delete-hint' }, '清除模式：点击产物标记，再点红色 × 清除（仅清除内存记录，不删除磁盘文件）') : null,
                 listChildren,
               ],
         ),
@@ -910,22 +920,25 @@ body[data-dsh-popout-dragging] #root {
           ref: previewRef,
           style: { flex: '1 1 0%' },
         },
-          preview ? renderPreview(preview) : React.createElement('div', { className: 'artifacts-hint' }, '← 点击左侧文件预览内容'),
+          preview ? renderPreview(preview) : React.createElement('div', { className: 'artifacts-hint' }, '点击文件预览内容'),
         ),
       )
     }
 
-    const HeaderAction = () => {
+    // Persistent trigger pinned to the top-right corner. Registered into the
+    // root-scoped `shell.overlay` list so it stays visible with no conversation;
+    // the fixed CSS position keeps it at the corner, offset left by the right
+    // sidebar(s) so it never gets covered. Icon-only by design.
+    const CornerButton = () => {
       const open = useOpen()
+      if (open) return null
       return React.createElement('button', {
         type: 'button',
-        className: 'artifacts-headbtn' + (open ? ' is-open' : ''),
-        title: 'Artifacts · 产物',
+        className: 'artifacts-corner-btn',
+        title: '弹出式侧边栏',
+        'aria-expanded': open,
         onClick: () => store.toggle(),
-      },
-        PanelIcon(16),
-        React.createElement('span', null, '产物'),
-      )
+      }, PanelIcon(18))
     }
 
     const SettingsToggle = (props) =>
@@ -991,9 +1004,9 @@ body[data-dsh-popout-dragging] #root {
       )
     }
 
-    slots.inject('conversation.session.header.utilities', () => slots.register(
-      { name: 'conversation.session.header.utilities', id: 'artifacts-sidebar', order: 50, label: 'Artifacts' },
-      HeaderAction,
+    slots.inject('shell.overlay', () => slots.register(
+      { name: 'shell.overlay', id: 'artifacts-sidebar-trigger', order: 40, label: 'Artifacts' },
+      CornerButton,
     ))
 
     slots.inject('shell.overlay', () => slots.register(
