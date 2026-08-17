@@ -551,6 +551,15 @@ header:has([data-slot="conversation.session.header.utilities"]) {
       const [copiedLabel, setCopiedLabel] = React.useState('')
       const copyTimer = React.useRef(null)
 
+      // Track the active session so the tree re-roots automatically when the
+      // workspace changes (no manual refresh needed).
+      const [sessionId, setSessionId] = React.useState(currentSessionId())
+      React.useEffect(() => {
+        const tick = () => setSessionId(currentSessionId())
+        const dispose = ctx.interval(tick, 500)
+        return () => { if (dispose) dispose() }
+      }, [])
+
       const loadRoot = () => {
         setChildren({})
         setExpanded({})
@@ -560,7 +569,7 @@ header:has([data-slot="conversation.session.header.utilities"]) {
         }).catch(() => {})
       }
 
-      React.useEffect(() => { loadRoot() }, [])
+      React.useEffect(() => { loadRoot() }, [sessionId])
 
       const toggle = (path) => {
         const nextExpanded = Object.assign({}, expanded, { [path]: !expanded[path] })
