@@ -555,9 +555,10 @@ header:has([data-slot="conversation.session.header.utilities"]) {
       // workspace changes (no manual refresh needed).
       const [sessionId, setSessionId] = React.useState(currentSessionId())
       React.useEffect(() => {
-        const tick = () => setSessionId(currentSessionId())
-        const dispose = ctx.interval(tick, 500)
-        return () => { if (dispose) dispose() }
+        let list
+        try { list = ctx.get('sessions') && ctx.get('sessions').list } catch (e) {}
+        if (!list || typeof list.subscribe !== 'function') return
+        return list.subscribe(() => setSessionId(currentSessionId()))
       }, [])
 
       const loadRoot = () => {
@@ -725,8 +726,10 @@ header:has([data-slot="conversation.session.header.utilities"]) {
           } catch (e) {}
         }
         write()
-        const dispose = ctx.interval(write, 500)
-        return () => { if (dispose) dispose() }
+        let list
+        try { list = ctx.get('sessions') && ctx.get('sessions').list } catch (e) {}
+        if (!list || typeof list.subscribe !== 'function') return
+        return list.subscribe(write)
       }, [])
 
       // Panel width (px): at least `minPanelWidth`% of the window, wider via

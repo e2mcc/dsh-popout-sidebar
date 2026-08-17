@@ -810,8 +810,8 @@ return {
     load();
     setInterval(load, 1500);
     // Follow the active session in real time: the main tab publishes the
-    // current session id to localStorage (SESSION_KEY); when it changes,
-    // re-root the file tree at the new workspace — same as the in-page sidebar.
+    // current session id to localStorage (SESSION_KEY) only when it actually
+    // changes, so the storage event alone is enough — no polling.
     var _lastTreeSession = currentSessionId();
     function watchSession() {
       var sid = currentSessionId();
@@ -820,7 +820,6 @@ return {
         if (treeRoot !== null) loadTreeRoot();
       }
     }
-    setInterval(watchSession, 1000);
     window.addEventListener('storage', function (e) {
       if (e.key === SESSION_KEY) watchSession();
     });
