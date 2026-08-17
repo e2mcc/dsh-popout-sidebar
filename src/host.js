@@ -31,6 +31,21 @@ return {
       png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
       webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif',
     }
+    // Shell executors whose filesystem side effects are NOT visible as a
+    // `write`/`edit` result. Snapshot-diff the workspace around these tools so
+    // files they create or overwrite (e.g. `python3 make_chart.py` emitting a
+    // PNG) still land in the artifact list.
+    const WATCH_TOOLS = { bash: 1, pwsh: 1 }
+    // Directories never walked during a snapshot: VCS / cache / dependency
+    // trees that are huge and never contain the artifacts the agent cares about.
+    const SKIP_DIRS = new Set([
+      'node_modules', 'venv', '.venv', 'env', '__pycache__', '.pytest_cache',
+      '.mypy_cache', '.ruff_cache', '.tox', '.cache', '.next', '.nuxt',
+      'dist', 'build', 'out', 'target', '.git', '.svn', '.hg', '.idea',
+      '.vscode', '.dsh', '.workbuddy',
+    ])
+    const SNAPSHOT_MAX_FILES = 5000
+    const SNAPSHOT_MAX_DEPTH = 16
 
     const kindOf = (path) => {
       const p = String(path || '')
@@ -67,6 +82,82 @@ return {
       }
     }
 
+    // Resolve the workspace root for a specific tool execution: the agent's
+    // session cwd wins, then the last-seen cwd, then the sandbox root.
+    const execCwd = (exec) => {
+      try {
+        const agent = exec && exec.agent
+        const c = agent && agent.session && agent.session.header && typeof agent.session.header.cwd === 'string' ? agent.session.header.cwd : ''
+        if (c) return c
+      } catch (e) {}
+      if (typeof lastCwd === 'string' && lastCwd) return lastCwd
+      try {
+        const policy = ctx.get('sandboxPolicy')
+        return policy && typeof policy.workspaceRoot === 'string' ? policy.workspaceRoot : undefined
+      } catch (e) {}
+      return undefined
+    }
+
+    // Recursively walk the workspace into a `path -> fingerprint` map. The
+    // fingerprint is the fs backend's opaque version token (dev:ino:size:
+    // mtime:ctime on the local backend), so any content/metadata change changes
+    // the value. Returns null when the filesystem or root is unavailable.
+    const snapshotWorkspace = async (cwd) => {
+      const fs = ctx.get('fs')
+      if (!fs || typeof fs.listDir !== 'function' || typeof fs.resolve !== 'function') return null
+      if (typeof cwd !== 'string' || !cwd) return null
+      const childPath = (target, parent, name) => (typeof fs.processPath === 'function' ? fs.processPath(target) : parent.replace(/\/+$/, '') + '/' + name)
+      const map = new Map()
+      let count = 0
+      const walk = async (dirPath, depth) => {
+        if (count >= SNAPSHOT_MAX_FILES || depth > SNAPSHOT_MAX_DEPTH) return
+        let entries
+        try {
+          const target = await fs.resolve(dirPath)
+          entries = await fs.listDir(target)
+        } catch (e) {
+          return // unreadable directory — skip it, never fatal
+        }
+        if (!entries) return
+        for (const e of entries) {
+          if (count >= SNAPSHOT_MAX_FILES) return
+          if (e.type === 'directory') {
+            if (e.name.startsWith('.') || SKIP_DIRS.has(e.name)) continue
+            await walk(childPath(e.target, dirPath, e.name), depth + 1)
+          } else if (e.type === 'file') {
+            count += 1
+            map.set(childPath(e.target, dirPath, e.name), e.version !== undefined ? String(e.version) : 'size:' + (e.size ?? ''))
+          }
+        }
+      }
+      await walk(cwd, 0)
+      return map
+    }
+
+    // New or changed files between two snapshots (deletions are irrelevant to
+    // an artifact list).
+    const diffSnapshot = (before, after) => {
+      const changes = []
+      for (const [path, fp] of after) {
+        const prev = before.get(path)
+        if (prev === undefined) changes.push({ path, kind: 'create' })
+        else if (prev !== fp) changes.push({ path, kind: 'edit' })
+      }
+      return changes
+    }
+
+    const recordSnapshotDiff = (before, after, exec) => {
+      let sessionId
+      try {
+        const agent = exec && exec.agent
+        if (agent && agent.session && agent.session.id != null) sessionId = String(agent.session.id)
+      } catch (e) {}
+      const changes = diffSnapshot(before, after)
+      for (const ch of changes) {
+        try { recordFile(ch.path, ch.kind, sessionId, undefined) } catch (e) {}
+      }
+    }
+
     ctx.on('tools/result', (exec, result) => {
       try {
         if (!exec || !result || result.isError === true) return
@@ -94,6 +185,31 @@ return {
         recordFile(path, name === 'write' ? 'create' : 'edit', sessionId, diff)
       } catch (e) {
         console.error('[artifacts] track failed', e)
+      }
+    })
+
+    // Fill the gap the `tools/result` whitelist leaves open: `bash`/`pwsh` write
+    // files as a side effect of the shell command, never through a `write`/`edit`
+    // result. Snapshot the workspace before and after the body and record the
+    // new/changed files. `tools/execute` is the around-dispatch wrapper, so
+    // `next()` runs the body — the "before" is taken pre-body, "after" post-body.
+    ctx.on('tools/execute', async (exec, next) => {
+      if (!exec || !WATCH_TOOLS[exec.name]) return next()
+      const cwd = execCwd(exec)
+      const before = await snapshotWorkspace(cwd)
+      let outcome
+      try {
+        outcome = await next()
+        return outcome
+      } finally {
+        if (before && outcome && outcome.isError !== true) {
+          try {
+            const after = await snapshotWorkspace(cwd)
+            if (after) recordSnapshotDiff(before, after, exec)
+          } catch (e) {
+            console.error('[artifacts] snapshot diff failed', e)
+          }
+        }
       }
     })
 
