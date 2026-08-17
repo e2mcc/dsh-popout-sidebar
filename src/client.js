@@ -729,7 +729,8 @@ header:has([data-slot="conversation.session.header.utilities"]) {
 
       if (!open) return null
 
-      const popoutHref = '/popout-sidebar'
+      const sid = currentSessionId()
+      const popoutHref = '/popout-sidebar' + (sid ? '?sessionId=' + encodeURIComponent(sid) : '')
 
       const startResize = (e) => {
         e.preventDefault()

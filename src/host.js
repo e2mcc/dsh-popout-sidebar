@@ -394,6 +394,14 @@ return {
     var CONTENT_URL = '/popout-sidebar/content';
     var MEDIA_URL = '/popout-sidebar/media';
     var LISTDIR_URL = '/popout-sidebar/listdir';
+    var _sm = /[?&]sessionId=([^&]+)/.exec(location.search);
+    var sessionId = _sm ? decodeURIComponent(_sm[1]) : '';
+    function listdirUrl(path) {
+      var q = [];
+      if (sessionId) q.push('sessionId=' + encodeURIComponent(sessionId));
+      if (path) q.push('path=' + encodeURIComponent(path));
+      return LISTDIR_URL + (q.length ? '?' + q.join('&') : '');
+    }
     var items = [];
     var selectedPath = null;
     var selectedItem = null;
@@ -666,7 +674,7 @@ return {
       var bodyEl = document.getElementById('treeBody');
       bodyEl.textContent = '';
       bodyEl.appendChild(el('div', 'tree-loading', '加载文件树…'));
-      fetch(LISTDIR_URL, { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (res) {
+      fetch(listdirUrl(), { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (res) {
         if (res && res.ok) {
           treeRoot = { path: res.path, entries: res.entries };
           if (rootLabel) rootLabel.textContent = basename(res.path);
@@ -749,7 +757,7 @@ return {
       if (!treeChildren[path]) {
         treeChildren[path] = { loading: true };
         renderTree();
-        fetch(LISTDIR_URL + '?path=' + encodeURIComponent(path), { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (res) {
+        fetch(listdirUrl(path), { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (res) {
           treeChildren[path] = res && res.ok ? { entries: res.entries } : { error: (res && res.error) || '读取失败' };
           renderTree();
         }).catch(function () {
