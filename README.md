@@ -67,7 +67,8 @@ dsh plugin --profile web add github:e2mcc/dsh-popout-sidebar
 ├── package.json          # 静态 bundle 元数据（main / exports ./client / dsh.bundle / dsh.client）
 ├── cordis.patch.yml      # bundle 挂载补丁（dsh plugin add 自动识别）
 ├── scripts
-│   └── build.js          # 组装脚本：把 src/{shared,host,client} 拼成下面的两个单文件 bundle
+│   ├── build.js          # 组装脚本：把 src/{shared,host,client} 拼成下面的两个单文件 bundle
+│   └── precommit.sh      # 提交前守护：自动重建 bundle，产物过期则拦截提交
 └── src
     ├── index.js          # 静态 Host 入口（ESM）：求值 host.js 主体并导出给 loader
     ├── host.js           # ⚙️ 生成产物：Host 单文件（由 scripts/build.js 生成，勿手改）
@@ -91,6 +92,8 @@ dsh plugin --profile web add github:e2mcc/dsh-popout-sidebar
 ```
 
 > 修改 `src/shared/`、`src/host/`、`src/client/` 里的源码后，运行 `npm run build`（或 `node scripts/build.js`）重新生成 `src/host.js` 与 `src/client.js`，再提交。运行时 DSH 只加载这两个生成产物。
+>
+> 建议安装提交前守护（一次即可）：`ln -sf ../../scripts/precommit.sh .git/hooks/pre-commit`。之后每次 `git commit` 会自动重建 bundle，若产物与源码不同步会直接拦截提交，杜绝「源码新、产物旧」。
 
 ## 使用 / Usage
 
