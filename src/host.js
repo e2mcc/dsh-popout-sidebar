@@ -1,32 +1,49 @@
 /**
- * 可弹出侧边栏 · Popout Sidebar — Host half
+ * 可弹出侧边栏 · Popout Sidebar — Host body
  *
- * This file is the plain-JavaScript **function body** consumed by DeepSeek
- * Harness's dynamic Cordis plugin loader. Pass this exact text (from the
- * `return { ... }` below) as `code.host` to `cordis_define`.
+ * Assembled by `scripts/build.js` into `src/host.js`. This is the plain-JS
+ * function body consumed by DeepSeek Harness's Cordis plugin loader — the very
+ * same text you can pass to `cordis_define` as `code.host`.
  *
- * Responsibilities (runs in the DSH Node.js process):
- *  - Track files created/edited by the `write` / `edit` tools via `tools/result`,
- *    tagging each artifact with its preview `type` and, for `edit`, the
- *    `old_string`/`new_string` diff snippet.
- *  - Expose Package-private RPC: `artifacts.list` / `artifacts.read` / `artifacts.remove`.
- *  - Serve the standalone web tab, its JSON endpoints, and a binary media
- *    route via `webServer.register`.
+ * The placeholder tokens in this skeleton are replaced at build time by:
+ *   ext      → src/shared/ext.js (shared preview-type helpers)
+ *   core     → src/host/core.js   (constants + artifact tracking + file ops)
+ *   page     → src/host/page.js   (standalone web tab HTML)
+ *   routes   → src/host/routes.js (the /popout-sidebar/* HTTP routes)
  */
-
 return {
   // Hard dependency: wait for the web server before registering routes
   // (loader entries mount concurrently, so without inject the apply may run
   // before `webServer` is provided and silently skip every route).
-  inject: ['webServer'],
+  // `sessionQuery` is also required so the file tree can resolve a switched-to
+  // session's workspace from the persisted corpus when it is not yet live.
+  inject: ['webServer', 'sessionQuery'],
   apply(ctx) {
+    // Shared extension → preview-type helpers (portable JS: var/function, no
+    // template literals, so this file can be inlined verbatim into the host Node
+    // scope, the client bundle, and the standalone page's String.raw inline script).
+    var EXT_IMAGE = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1, svg: 1, bmp: 1, ico: 1, avif: 1 };
+    var EXT_MARKDOWN = { md: 1, markdown: 1, mdx: 1, mdown: 1 };
+    var EXT_HTML = { html: 1, htm: 1, xhtml: 1 };
+
+    function extType(path) {
+      var m = /\.([^.]+)$/.exec(String(path || ''));
+      var ext = m ? m[1].toLowerCase() : '';
+      if (EXT_IMAGE[ext]) return 'image';
+      if (EXT_MARKDOWN[ext]) return 'markdown';
+      if (EXT_HTML[ext]) return 'html';
+      return 'text';
+    }
+
+    function fileExt(path) {
+      var m = /\.([^.]+)$/.exec(String(path || ''));
+      return m ? m[1].toLowerCase() : '';
+    }
+
     let artifacts = []
     let seq = 0
     let lastCwd // the most recently seen session working directory (workspace)
 
-    const EXT_IMAGE = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1, svg: 1, bmp: 1, ico: 1, avif: 1 }
-    const EXT_MARKDOWN = { md: 1, markdown: 1, mdx: 1, mdown: 1 }
-    const EXT_HTML = { html: 1, htm: 1, xhtml: 1 }
     const MIME = {
       png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
       webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif',
@@ -47,16 +64,6 @@ return {
     const SNAPSHOT_MAX_FILES = 5000
     const SNAPSHOT_MAX_DEPTH = 16
 
-    const kindOf = (path) => {
-      const p = String(path || '')
-      const m = /\.([^.]+)$/.exec(p)
-      const ext = m ? m[1].toLowerCase() : ''
-      if (EXT_IMAGE[ext]) return 'image'
-      if (EXT_MARKDOWN[ext]) return 'markdown'
-      if (EXT_HTML[ext]) return 'html'
-      return 'text'
-    }
-
     // Clip a diff snippet so the list payload stays bounded even when the
     // agent replaces a huge region in one edit.
     const clip = (s, n) => (s.length > n ? s.slice(0, n) + '\n…' : s)
@@ -72,10 +79,10 @@ return {
         existing.sessionId = sessionId
         existing.at = at
         existing.seq = seq
-        existing.type = kindOf(path)
+        existing.type = extType(path)
         if (diff) existing.diff = diff
       } else {
-        const entry = { id: 'a' + seq, path: path, kind: kind, type: kindOf(path), sessionId: sessionId, at: at, seq: seq }
+        const entry = { id: 'a' + seq, path: path, kind: kind, type: extType(path), sessionId: sessionId, at: at, seq: seq }
         if (diff) entry.diff = diff
         artifacts.push(entry)
         if (artifacts.length > 1000) artifacts = artifacts.slice(-1000)
@@ -225,7 +232,7 @@ return {
         if (!info || info.type !== 'file') return { ok: false, error: 'not a readable file' }
         const text = await fs.readText(target)
         const cap = 200000
-        return { ok: true, type: kindOf(path), content: text.slice(0, cap), truncated: text.length > cap, size: info.size }
+        return { ok: true, type: extType(path), content: text.slice(0, cap), truncated: text.length > cap, size: info.size }
       } catch (e) {
         return { ok: false, error: e && e.message ? String(e.message) : 'read failed' }
       }
@@ -289,22 +296,51 @@ return {
       return undefined
     }
 
+    // Resolve the workspace root for a list request. A named session must
+    // resolve to ITS OWN workspace: a freshly switched-to workspace may not be
+    // live in the server's session store yet, so we also consult the persisted
+    // corpus (sessionQuery) — and never substitute an unrelated "most recent"
+    // workspace when the caller named a session. Only an unnamed request (the
+    // standalone tab's first load, before its localStorage syncs) falls back to
+    // a best-effort default.
+    const resolveCwd = async (sessionId) => {
+      const live = sessionCwd(sessionId)
+      if (live) return live
+      if (typeof sessionId === 'string' && sessionId) {
+        try {
+          const query = ctx.get('sessionQuery')
+          if (query && typeof query.listSessions === 'function') {
+            const records = await query.listSessions()
+            if (records) {
+              for (const rec of records) {
+                const h = rec && rec.header
+                if (h && h.id === sessionId && typeof h.cwd === 'string' && h.cwd) return h.cwd
+              }
+            }
+          }
+        } catch (e) {}
+        return undefined // named but unresolvable — never substitute another workspace
+      }
+      const def = await defaultSessionCwd()
+      if (def) return def
+      if (typeof lastCwd === 'string' && lastCwd) return lastCwd
+      try {
+        const policy = ctx.get('sandboxPolicy')
+        return policy && typeof policy.workspaceRoot === 'string' ? policy.workspaceRoot : undefined
+      } catch (e) {}
+      return undefined
+    }
+
     // List one directory level for the file-tree (文件树) view: directories
     // first, then files, case-insensitive name order.
     const listDir = async (path, sessionId) => {
       const fs = ctx.get('fs')
       if (!fs) return { ok: false, error: 'filesystem unavailable' }
       try {
-        const policy = ctx.get('sandboxPolicy')
-        const policyRoot = policy && typeof policy.workspaceRoot === 'string' ? policy.workspaceRoot : undefined
-        // `sessionCwd(sessionId)` wins when the client names a session (the
-        // in-page sidebar does); the standalone tab passes no session id, so
-        // it falls through to defaultSessionCwd() — which must skip stale
-        // sessions whose cwd no longer exists (e.g. after a workspace rename).
-        const cwd = sessionCwd(sessionId) || (await defaultSessionCwd()) || (typeof lastCwd === 'string' && lastCwd) || policyRoot
+        const cwd = await resolveCwd(sessionId)
         let p = path
         if (typeof p !== 'string' || !p) {
-          if (!cwd) return { ok: false, error: 'missing path' }
+          if (!cwd) return { ok: false, error: 'workspace unavailable' }
           p = cwd
         }
         const target = await fs.resolve(p, cwd ? { cwd: cwd } : undefined)
@@ -332,6 +368,8 @@ return {
       harness.handle('artifacts.read', (args) => readFile(args && args.path))
       harness.handle('artifacts.listDir', (args) => listDir(args && args.path, args && args.sessionId))
     }
+
+
 
     const webServer = ctx.get('webServer')
     if (webServer) {
@@ -407,7 +445,8 @@ return {
   .list { flex: 1; min-height: 0; overflow-y: auto; }
   .list .empty { padding: 32px 20px; color: var(--p-text-tertiary); text-align: center; }
   .item { display: flex; align-items: stretch; border-bottom: 1px solid var(--p-border-l1); }
-  .item.active { background: var(--p-hover); }
+  /* Selected artifact: left accent bar distinguishes it from the file tree. */
+  .item.active { background: var(--p-hover); box-shadow: inset 3px 0 0 var(--p-accent); }
   .item-main { flex: 1; min-width: 0; text-align: left; padding: 10px 14px; border: none; background: transparent; color: inherit; cursor: pointer; font: inherit; }
   .item-main:hover { background: var(--p-hover); }
   .item .row { display: flex; align-items: center; gap: 8px; }
@@ -451,7 +490,7 @@ return {
   .diff-block.del .diff-pre { background: rgba(236,19,19,0.05); }
   .diff-block.add .diff-pre { background: rgba(34,197,94,0.06); }
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--p-bg-layer-1); border: 1px solid var(--p-border-l2); color: var(--p-text); padding: 6px 14px; border-radius: 8px; font-size: 12px; opacity: 0; transition: opacity .18s; pointer-events: none; box-shadow: var(--p-shadow); z-index: 10; }
-  .tabs { display: flex; align-items: stretch; height: 34px; border-bottom: 1px solid var(--p-border-l2); background: var(--p-bg-layer-1); flex: none; }
+  .tabs { display: flex; align-items: stretch; height: 34px; border-bottom: 2px solid #fff; background: var(--p-bg-layer-1); flex: none; }
   .tab { flex: 1; border: none; background: var(--p-hover); color: var(--p-text-tertiary); font: inherit; font-size: 12px; cursor: pointer; border-right: 1px solid var(--p-border-l1); }
   .tab:hover { background: var(--p-hover); }
   .tab.is-active { color: var(--p-text); background: transparent; }
@@ -476,6 +515,28 @@ return {
   .tree-copied { font-size: 11px; color: var(--p-text-tertiary); flex: none; }
   .tree-loading { color: var(--p-text-tertiary); cursor: default; font-size: 12px; }
   .tree-error { color: var(--p-error); cursor: default; font-size: 12px; }
+  /* Code preview (syntax-highlighted) */
+  .codeview { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .codeview-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--p-border-l2); }
+  .codeview-lang { font-size: 11px; font-weight: 600; color: var(--p-text-secondary); padding: 1px 8px; border-radius: 4px; background: var(--p-hover); }
+  .codeview-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: flex-start; background: var(--p-code-bg); }
+  .codeview-gutter { flex: none; min-width: 3em; margin: 0; padding: 16px 10px 16px 12px; text-align: right; color: var(--p-text-caption); background: var(--p-code-bg); border-right: 1px solid var(--p-border-l1); position: sticky; left: 0; user-select: none; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
+  .codeview-pre { flex: 1; margin: 0; padding: 16px; background: var(--p-code-bg); font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
+  .codeview-pre code { font: inherit; }
+  .tok-comment { color: #868e96; }
+  .tok-string { color: #2f9e44; }
+  .tok-number, .tok-bool, .tok-variable, .tok-hex, .tok-attr { color: #e8590c; }
+  .tok-keyword, .tok-important, .tok-atrule { color: #d6336c; }
+  .tok-function, .tok-decorator { color: #6741d9; }
+  .tok-class, .tok-builtin, .tok-tag, .tok-key { color: #1971c2; }
+  .tok-property { color: #495057; }
+  :root[data-ds-dark-theme] .tok-comment { color: #adb5bd; }
+  :root[data-ds-dark-theme] .tok-string { color: #69db7c; }
+  :root[data-ds-dark-theme] .tok-number, :root[data-ds-dark-theme] .tok-bool, :root[data-ds-dark-theme] .tok-variable, :root[data-ds-dark-theme] .tok-hex, :root[data-ds-dark-theme] .tok-attr { color: #ffa94d; }
+  :root[data-ds-dark-theme] .tok-keyword, :root[data-ds-dark-theme] .tok-important, :root[data-ds-dark-theme] .tok-atrule { color: #faa2c1; }
+  :root[data-ds-dark-theme] .tok-function, :root[data-ds-dark-theme] .tok-decorator { color: #b197fc; }
+  :root[data-ds-dark-theme] .tok-class, :root[data-ds-dark-theme] .tok-builtin, :root[data-ds-dark-theme] .tok-tag, :root[data-ds-dark-theme] .tok-key { color: #74c0fc; }
+  :root[data-ds-dark-theme] .tok-property { color: #ced4da; }
 </style>
 </head>
 <body>
@@ -506,6 +567,207 @@ return {
   </main>
   <div class="toast" id="toast"></div>
   <script>
+    // Shared self-contained syntax highlighter (portable JS, no template literals,
+    // no interpolation, no backticks — safe to inline verbatim into the standalone
+    // page's String.raw template). Emits span class tok-* tokens; color them in CSS.
+    function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+    function makeHl(specs, flags) {
+      var src = '';
+      for (var i = 0; i < specs.length; i += 1) src += (i ? '|' : '') + '(' + specs[i][1] + ')';
+      var re = new RegExp(src, flags || 'g');
+      return function (code) {
+        re.lastIndex = 0;
+        var out = '', last = 0, m;
+        while ((m = re.exec(code)) !== null) {
+          if (m.index > last) out += escHtml(code.slice(last, m.index));
+          for (var g = 1; g < m.length; g += 1) {
+            if (m[g] !== undefined) {
+              out += '<span class="tok-' + specs[g - 1][0] + '">' + escHtml(m[g]) + '</span>';
+              break;
+            }
+          }
+          last = re.lastIndex;
+          if (m[0].length === 0) { re.lastIndex += 1; last = re.lastIndex; }
+        }
+        if (last < code.length) out += escHtml(code.slice(last));
+        return out;
+      };
+    }
+
+    var S_DQ = "\"(?:[^\"\\\\\\n]|\\\\.)*\"";
+    var S_SQ = "\\x27(?:[^\\x27\\\\\\n]|\\\\.)*\\x27";
+    var S_BT = "\\x60(?:[^\\x60\\\\]|\\\\.)*\\x60";
+    var NUM = "\\b(?:0[xX][0-9a-fA-F]+|\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\b";
+    var C_LINE = "//[^\\n]*";
+    var C_BLK = "/\\*[\\s\\S]*?\\*/";
+    var HASH = "#[^\\n]*";
+    var SQL_LINE = "--[^\\n]*";
+    var HTML_COMMENT = "<!--[\\s\\S]*?-->";
+    var PY_TRI = "(?:\"\"\"[\\s\\S]*?\"\"\"|\\x27\\x27\\x27[\\s\\S]*?\\x27\\x27\\x27)";
+    var PY_STR = "(?:[rfbuRFBU]{0,2})(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\x27(?:[^\\x27\\\\\\n]|\\\\.)*\\x27)";
+    var CSS_NUM = "\\b\\d+(?:\\.\\d+)?(?:[a-zA-Z%]*)\\b";
+    var HEX = "#[0-9a-fA-F]{3,8}\\b";
+    var AT = "@[\\w-]+";
+    var PROP = "[\\w-]+(?=\\s*:)";
+    var TAG = "</?[\\w-]+|/?>";
+    var ATTR = "[\\w-]+(?==)";
+    var VAR = "\\$(?:\\{[\\w]+\\}|[\\w]+)";
+    var VAR_PHP = "\\$\\w+";
+    var DECORATOR = "@[\\w.]+";
+    var IMPORTANT = "!important\\b";
+    var FUNC = "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()";
+    var FUNC_PY = "\\b[A-Za-z_][\\w]*(?=\\s*\\()";
+    var CLASS = "\\b[A-Z][\\w$]*\\b";
+    var YAML_KEY = "^\\s*(?:-\\s+)?[\\w.@-]+(?=\\s*:)";
+
+    function kwWord(kw) { return '\\b(?:' + kw.replace(/\s+/g, '|') + ')\\b'; }
+
+    var JS_KW = 'break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new return static super switch this throw try typeof var void while with yield async await of get set null undefined true false';
+    var PY_KW = 'and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield True False None self';
+    var SH_KW = 'if then elif else fi for while do done case esac function select in until return exit set unset export readonly local shift source';
+    var SQL_KW = 'select from where insert into update delete create drop alter table index view join left right inner outer full on as and or not null group by order having limit offset union all distinct values set primary key foreign references default like between is in exists asc desc';
+    var C_KW = 'auto break case const continue default do double else enum extern float for goto if int long register return short signed sizeof static struct switch typedef union unsigned void volatile while';
+    var GO_KW = 'break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var';
+    var RUST_KW = 'as async await break const continue crate dyn else enum extern fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait type union unsafe use where while';
+    var JAVA_KW = 'abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for if implements import instanceof int interface long native new package private protected public return short static strictfp super switch synchronized this throw throws transient try void volatile while';
+    var RB_KW = 'begin case class def do else elsif end ensure for if module next nil not or redo rescue retry return self super then true false undef unless until when while yield';
+    var PHP_KW = 'abstract and array as break callable case catch class clone const continue declare default do echo else elseif empty enddeclare endfor endforeach endif endswitch endwhile extends final finally fn for foreach function global if implements include instanceof insteadof interface isset list namespace new or print private protected public require return static switch throw trait try unset use var while xor yield';
+
+    function cFamily(kw) {
+      return makeHl([
+        ['comment', C_LINE + '|' + C_BLK],
+        ['string', S_BT + '|' + S_DQ + '|' + S_SQ],
+        ['number', NUM],
+        ['keyword', kwWord(kw)],
+        ['function', FUNC],
+        ['class', CLASS],
+      ]);
+    }
+
+    var HL_ENGINES = {
+      js: makeHl([
+        ['comment', C_LINE + '|' + C_BLK],
+        ['string', S_BT + '|' + S_DQ + '|' + S_SQ],
+        ['number', NUM],
+        ['keyword', kwWord(JS_KW)],
+        ['builtin', '\\b(?:console|Math|JSON|Promise|Array|Object|String|Number|Boolean|RegExp|Date|Map|Set|WeakMap|WeakSet|Symbol|BigInt|Infinity|NaN|window|document|process|require|module|exports|setTimeout|clearTimeout|fetch|globalThis)\\b'],
+        ['function', FUNC],
+        ['class', CLASS],
+      ]),
+      py: makeHl([
+        ['comment', HASH],
+        ['string', PY_TRI + '|' + PY_STR],
+        ['number', NUM],
+        ['keyword', kwWord(PY_KW)],
+        ['builtin', '\\b(?:print|len|range|enumerate|zip|map|filter|int|str|float|bool|list|dict|set|tuple|type|isinstance|super|open|input|repr|format|sorted|reversed|sum|min|max|abs|round|any|all|next|iter|dir|vars|getattr|setattr|hasattr|id|hash|bytes|bytearray|complex|frozenset|object|classmethod|staticmethod|property|Exception|ValueError|TypeError|KeyError|IndexError|ImportError|RuntimeError|StopIteration)\\b'],
+        ['decorator', DECORATOR],
+        ['function', FUNC_PY],
+      ]),
+      css: makeHl([
+        ['comment', C_BLK],
+        ['string', S_DQ + '|' + S_SQ],
+        ['atrule', AT],
+        ['property', PROP],
+        ['number', CSS_NUM],
+        ['hex', HEX],
+        ['important', IMPORTANT],
+      ]),
+      html: makeHl([
+        ['comment', HTML_COMMENT],
+        ['string', S_DQ + '|' + S_SQ],
+        ['tag', TAG],
+        ['attr', ATTR],
+      ]),
+      sh: makeHl([
+        ['comment', HASH],
+        ['string', S_DQ + '|' + S_SQ + '|' + S_BT],
+        ['variable', VAR],
+        ['number', NUM],
+        ['keyword', kwWord(SH_KW)],
+      ]),
+      yaml: makeHl([
+        ['comment', HASH],
+        ['string', S_DQ + '|' + S_SQ],
+        ['number', NUM],
+        ['bool', '\\b(?:true|false|null|yes|no|on|off)\\b'],
+        ['key', YAML_KEY],
+      ], 'gm'),
+      sql: makeHl([
+        ['comment', SQL_LINE + '|' + C_BLK],
+        ['string', S_SQ + '|' + S_DQ],
+        ['number', NUM],
+        ['keyword', kwWord(SQL_KW)],
+        ['function', FUNC_PY],
+      ], 'gi'),
+      json: makeHl([
+        ['string', S_DQ],
+        ['number', NUM],
+        ['bool', '\\b(?:true|false|null)\\b'],
+      ]),
+      c: cFamily(C_KW),
+      cpp: cFamily(C_KW),
+      go: cFamily(GO_KW),
+      rust: cFamily(RUST_KW),
+      java: cFamily(JAVA_KW),
+      rb: makeHl([
+        ['comment', HASH],
+        ['string', S_DQ + '|' + S_SQ],
+        ['number', NUM],
+        ['keyword', kwWord(RB_KW)],
+        ['function', FUNC_PY],
+        ['class', CLASS],
+      ]),
+      php: makeHl([
+        ['comment', C_LINE + '|' + C_BLK + '|' + HASH],
+        ['string', S_DQ + '|' + S_SQ],
+        ['variable', VAR_PHP],
+        ['number', NUM],
+        ['keyword', kwWord(PHP_KW)],
+        ['function', FUNC_PY],
+      ]),
+    };
+
+    var HL_LANG_MAP = {
+      js: 'js', mjs: 'js', cjs: 'js', jsx: 'js', javascript: 'js',
+      ts: 'js', tsx: 'js', mts: 'js', cts: 'js', typescript: 'js',
+      json: 'json', jsonc: 'json', json5: 'js',
+      py: 'py', python: 'py', pyw: 'py',
+      rb: 'rb', ruby: 'rb',
+      go: 'go', golang: 'go',
+      rs: 'rust', rust: 'rust',
+      java: 'java',
+      c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp', cs: 'c', csharp: 'c',
+      kotlin: 'c', kt: 'c', swift: 'c',
+      php: 'php',
+      yaml: 'yaml', yml: 'yaml', toml: 'sh', ini: 'sh', conf: 'sh', properties: 'sh', env: 'sh',
+      md: 'md', markdown: 'md', mdx: 'md',
+      html: 'html', htm: 'html', xhtml: 'html', vue: 'html', xml: 'html', svg: 'html',
+      css: 'css', scss: 'css', less: 'css',
+      sql: 'sql',
+      lua: 'c',
+      sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', fish: 'sh',
+    };
+
+    var HL_LANG_NAMES = {
+      js: 'JavaScript', py: 'Python', css: 'CSS', html: 'HTML/XML', sh: 'Shell',
+      yaml: 'YAML', sql: 'SQL', c: 'C/C++', cpp: 'C++', go: 'Go', rust: 'Rust',
+      java: 'Java', rb: 'Ruby', php: 'PHP', json: 'JSON', plain: 'Text',
+    };
+
+    function hlLangOf(hint) {
+      var h = String(hint || '').toLowerCase();
+      if (h.charAt(0) === '.') h = h.slice(1);
+      return HL_LANG_MAP[h] || 'plain';
+    }
+
+    function hlLangLabel(hint) { return HL_LANG_NAMES[hlLangOf(hint)] || 'Text'; }
+
+    function highlightCode(src, hint) {
+      var fn = HL_ENGINES[hlLangOf(hint)];
+      return fn ? fn(String(src)) : escHtml(src);
+    }
+
     var DATA_URL = '/popout-sidebar/data';
     var CONTENT_URL = '/popout-sidebar/content';
     var MEDIA_URL = '/popout-sidebar/media';
@@ -535,9 +797,13 @@ return {
     var treeExpanded = {};
     var currentView = 'artifacts';
 
+    // Shared extension → preview-type helpers (portable JS: var/function, no
+    // template literals, so this file can be inlined verbatim into the host Node
+    // scope, the client bundle, and the standalone page's String.raw inline script).
     var EXT_IMAGE = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1, svg: 1, bmp: 1, ico: 1, avif: 1 };
     var EXT_MARKDOWN = { md: 1, markdown: 1, mdx: 1, mdown: 1 };
     var EXT_HTML = { html: 1, htm: 1, xhtml: 1 };
+
     function extType(path) {
       var m = /\.([^.]+)$/.exec(String(path || ''));
       var ext = m ? m[1].toLowerCase() : '';
@@ -546,6 +812,12 @@ return {
       if (EXT_HTML[ext]) return 'html';
       return 'text';
     }
+
+    function fileExt(path) {
+      var m = /\.([^.]+)$/.exec(String(path || ''));
+      return m ? m[1].toLowerCase() : '';
+    }
+
 
     var FOLDER_CLOSE_D = 'M5.05582 0.518756L4.50669 0.86654L5.05582 0.518756ZM13 9.4837L13.65 9.4837L13.65 3.53962L13 3.53962L12.35 3.53962L12.35 9.4837L13 9.4837ZM11.3264 1.86603L11.3264 1.21603L6.52313 1.21603L6.52313 1.86603L6.52313 2.51603L11.3264 2.51603L11.3264 1.86603ZM5.58054 1.34727L6.12968 0.999489L5.60495 0.170972L5.05582 0.518756L4.50669 0.86654L5.03141 1.69506L5.58054 1.34727ZM4.11323 1.23058e-13L4.11323 -0.65L1.67359 -0.65L1.67359 5.00699e-14L1.67359 0.65L4.11323 0.65L4.11323 1.23058e-13ZM0 1.67359L-0.65 1.67359L-0.65 9.4837L0 9.4837L0.65 9.4837L0.65 1.67359L0 1.67359ZM11.3264 11.1573L11.3264 10.5073L1.67359 10.5073L1.67359 11.1573L1.67359 11.8073L11.3264 11.8073L11.3264 11.1573ZM0 9.4837L-0.65 9.4837C-0.65 10.767 0.390308 11.8073 1.67359 11.8073L1.67359 11.1573L1.67359 10.5073C1.10828 10.5073 0.65 10.049 0.65 9.4837L0 9.4837ZM1.67359 5.00699e-14L1.67359 -0.65C0.390307 -0.65 -0.65 0.390309 -0.65 1.67359L0 1.67359L0.65 1.67359C0.65 1.10828 1.10828 0.65 1.67359 0.65L1.67359 5.00699e-14ZM5.05582 0.518756L5.60495 0.170972C5.28121 -0.340193 4.71829 -0.65 4.11323 -0.65L4.11323 1.23058e-13L4.11323 0.65C4.27282 0.65 4.4213 0.731715 4.50669 0.86654L5.05582 0.518756ZM6.52313 1.86603L6.52313 1.21603C6.36354 1.21603 6.21507 1.13431 6.12968 0.999489L5.58054 1.34727L5.03141 1.69506C5.35515 2.20622 5.91808 2.51603 6.52313 2.51603L6.52313 1.86603ZM13 3.53962L13.65 3.53962C13.65 2.25634 12.6097 1.21603 11.3264 1.21603L11.3264 1.86603L11.3264 2.51603C11.8917 2.51603 12.35 2.97431 12.35 3.53962L13 3.53962ZM13 9.4837L12.35 9.4837C12.35 10.049 11.8917 10.5073 11.3264 10.5073L11.3264 11.1573L11.3264 11.8073C12.6097 11.8073 13.65 10.767 13.65 9.4837L13 9.4837Z';
     var FOLDER_OPEN_D1 = 'M5.19629 1.57104C5.81144 1.5711 6.38623 1.8786 6.72754 2.39038L7.19922 3.09839C7.28454 3.22635 7.42824 3.30344 7.58203 3.30347H12.1699C13.5039 3.30348 14.5859 4.38548 14.5859 5.71948V6.62671C15.2694 7.02689 15.6605 7.85012 15.4385 8.68726L14.3848 12.658C14.1037 13.7164 13.1449 14.4527 12.0498 14.4529H2.91699C1.51651 14.4529 0.451662 13.2814 0.501954 11.9519V3.98706C0.501954 2.65305 1.58396 1.57104 2.91797 1.57104H5.19629ZM3.7793 7.75562C3.30994 7.75562 2.89883 8.07153 2.77832 8.52515L1.91602 11.7722C1.74167 12.4291 2.23734 13.073 2.91699 13.073H12.0498C12.5191 13.0728 12.9304 12.757 13.0508 12.3035L14.1045 8.33374C14.1819 8.04202 13.9619 7.756 13.6602 7.75562H3.7793ZM2.91797 2.9519C2.34625 2.9519 1.88281 3.41534 1.88281 3.98706V7.2937C2.33068 6.7269 3.02249 6.37476 3.7793 6.37476H13.2051V5.71948C13.2051 5.14777 12.7416 4.68434 12.1699 4.68433H7.58203C6.96675 4.6843 6.39209 4.37595 6.05078 3.86401L5.5791 3.15601C5.49379 3.02821 5.34995 2.95196 5.19629 2.9519H2.91797Z';
@@ -615,29 +887,38 @@ return {
         navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text); done(); });
       } else { fallbackCopy(text); done(); }
     }
+    // Shared minimal Markdown → HTML renderer (portable JS, no template literals).
+    // Backticks are written as \x60 so the file can be inlined verbatim into the
+    // standalone page's String.raw template. Fenced code blocks are highlighted via
+    // highlightCode from shared/highlight.js.
     function mdEscape(s) {
       return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
+
     function mdInline(s) {
-      s = s.replace(/\`([^\`]+)\`/g, function (m, c) { return '<code>' + c + '</code>'; });
+      s = s.replace(/\x60([^\x60]+)\x60/g, function (m, c) { return '<code>' + c + '</code>'; });
       s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img alt="$1" src="$2">');
       s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
       s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
       s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
       return s;
     }
+
     function mdToHtml(src) {
       var lines = String(src || '').replace(/\r\n/g, '\n').split('\n');
       var out = [];
       var i = 0;
       while (i < lines.length) {
         var line = lines[i];
-        if (/^\s*\`\`\`/.test(line)) {
+        if (/^\s*\x60\x60\x60/.test(line)) {
+          var fence = /^\s*\x60\x60\x60([\w+-]*)/.exec(line);
+          var langHint = fence ? fence[1] : '';
           var buf = [];
           i += 1;
-          while (i < lines.length && !/^\s*\`\`\`/.test(lines[i])) { buf.push(lines[i]); i += 1; }
+          while (i < lines.length && !/^\s*\x60\x60\x60/.test(lines[i])) { buf.push(lines[i]); i += 1; }
           i += 1;
-          out.push('<pre><code>' + mdEscape(buf.join('\n')) + '</code></pre>');
+          var codeText = buf.join('\n');
+          out.push('<pre><code>' + highlightCode(codeText, langHint) + '</code></pre>');
           continue;
         }
         var h = /^(#{1,6})\s+(.*)$/.exec(line);
@@ -672,6 +953,8 @@ return {
       }
       return out.join('\n');
     }
+
+
     function diffNode(d) {
       var wrap = el('div', 'diff');
       if (d && d.before != null && d.before !== '') {
@@ -767,9 +1050,27 @@ return {
           md.innerHTML = mdToHtml(data.content);
           area.appendChild(md);
         } else {
-          var pre = el('pre', null, data.content);
           if (data.truncated) area.appendChild(el('div', 'diff-label', '(truncated preview)'));
-          area.appendChild(pre);
+          var ext = fileExt(path);
+          var codeView = el('div', 'codeview');
+          var head = el('div', 'codeview-head');
+          head.appendChild(el('span', 'codeview-lang', hlLangLabel(ext)));
+          codeView.appendChild(head);
+          var scroll = el('div', 'codeview-scroll');
+          var gutter = el('pre', 'codeview-gutter');
+          gutter.setAttribute('aria-hidden', 'true');
+          var lineCount = data.content.split('\n').length;
+          var gutterText = '';
+          for (var gi = 0; gi < lineCount; gi += 1) gutterText += (gi + 1) + (gi < lineCount - 1 ? '\n' : '');
+          gutter.textContent = gutterText;
+          var pre = el('pre', 'codeview-pre');
+          var code = el('code');
+          code.innerHTML = highlightCode(data.content, ext);
+          pre.appendChild(code);
+          scroll.appendChild(gutter);
+          scroll.appendChild(pre);
+          codeView.appendChild(scroll);
+          area.appendChild(codeView);
         }
       }).catch(function (e) {
         area.appendChild(errNode(String(e && e.message ? e.message : e)));
@@ -949,6 +1250,7 @@ return {
   </script>
 </body>
 </html>`
+
 
       ctx.effect(() => webServer.register({
         kind: 'exact',

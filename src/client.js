@@ -1,21 +1,20 @@
 /**
- * 可弹出侧边栏 · Popout Sidebar — Client bundle
+ * 可弹出侧边栏 · Popout Sidebar — Client body
  *
- * Static client bundle for the DSH web profile, served by the web app at
- * `/plugins/dsh-popout-sidebar/client.js` and registered through the
- * browser `window.__ModuleLoader__`. The `factory` provides the closure
- * symbols the dynamic runner injects (`React`, `styles`, `host`) so the
- * canonical plugin body below works unchanged in both modes: as this bundle,
- * or extracted (the `return { ... }` inside) and passed to `cordis_define`
- * as `code.client`.
+ * Assembled by `scripts/build.js` into `src/client.js` (the static browser
+ * bundle served at `/plugins/dsh-popout-sidebar/client.js` and registered
+ * through `window.__ModuleLoader__`).
  *
- * Responsibilities (runs in the browser):
- *  - Register the「产物」trigger button in `conversation.session.header.utilities`.
- *  - Render the floating sidebar panel in `shell.overlay`.
- *  - Pull data from the Host through the `host.call` façade below, which maps
- *    the dynamic RPC methods onto the host's `/popout-sidebar/*` routes.
+ * The placeholder tokens in this skeleton are replaced at build time by:
+ *   ext        → src/shared/ext.js
+ *   highlight  → src/shared/highlight.js
+ *   markdown   → src/shared/markdown.js
+ *   core       → src/client/core.js       (state/store/settings helpers)
+ *   styles     → src/client/styles.js     (the injected CSS)
+ *   icons      → src/client/icons.js      (inline SVG icons)
+ *   preview    → src/client/preview.js    (renderDiff/renderPreview/CodeView)
+ *   components → src/client/components.js (FileTree/ArtifactsPanel/…)
  */
-
 window.__ModuleLoader__.load({
   id: 'dsh-popout-sidebar',
   factory: (require) => {
@@ -24,6 +23,12 @@ window.__ModuleLoader__.load({
 
     // Closure symbols — the same names the dynamic runner injects.
     const React = require('react')
+
+    // DSH's built-in Shiki syntax highlighter. Optional: gracefully degrades to
+    // a plain code view when unavailable (e.g. under the dynamic runner, which
+    // does not inject this module).
+    let primitives = null
+    try { primitives = require('@deepseek-ai/dsh-client-ui-primitives') } catch (e) { primitives = null }
 
     const styles = {
       insert(css) {
@@ -67,23 +72,299 @@ window.__ModuleLoader__.load({
     const slots = ctx.get('slots')
     if (slots === undefined) return
 
+    // Shared extension → preview-type helpers (portable JS: var/function, no
+    // template literals, so this file can be inlined verbatim into the host Node
+    // scope, the client bundle, and the standalone page's String.raw inline script).
+    var EXT_IMAGE = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1, svg: 1, bmp: 1, ico: 1, avif: 1 };
+    var EXT_MARKDOWN = { md: 1, markdown: 1, mdx: 1, mdown: 1 };
+    var EXT_HTML = { html: 1, htm: 1, xhtml: 1 };
+
+    function extType(path) {
+      var m = /\.([^.]+)$/.exec(String(path || ''));
+      var ext = m ? m[1].toLowerCase() : '';
+      if (EXT_IMAGE[ext]) return 'image';
+      if (EXT_MARKDOWN[ext]) return 'markdown';
+      if (EXT_HTML[ext]) return 'html';
+      return 'text';
+    }
+
+    function fileExt(path) {
+      var m = /\.([^.]+)$/.exec(String(path || ''));
+      return m ? m[1].toLowerCase() : '';
+    }
+
+    // Shared self-contained syntax highlighter (portable JS, no template literals,
+    // no interpolation, no backticks — safe to inline verbatim into the standalone
+    // page's String.raw template). Emits span class tok-* tokens; color them in CSS.
+    function escHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+    function makeHl(specs, flags) {
+      var src = '';
+      for (var i = 0; i < specs.length; i += 1) src += (i ? '|' : '') + '(' + specs[i][1] + ')';
+      var re = new RegExp(src, flags || 'g');
+      return function (code) {
+        re.lastIndex = 0;
+        var out = '', last = 0, m;
+        while ((m = re.exec(code)) !== null) {
+          if (m.index > last) out += escHtml(code.slice(last, m.index));
+          for (var g = 1; g < m.length; g += 1) {
+            if (m[g] !== undefined) {
+              out += '<span class="tok-' + specs[g - 1][0] + '">' + escHtml(m[g]) + '</span>';
+              break;
+            }
+          }
+          last = re.lastIndex;
+          if (m[0].length === 0) { re.lastIndex += 1; last = re.lastIndex; }
+        }
+        if (last < code.length) out += escHtml(code.slice(last));
+        return out;
+      };
+    }
+
+    var S_DQ = "\"(?:[^\"\\\\\\n]|\\\\.)*\"";
+    var S_SQ = "\\x27(?:[^\\x27\\\\\\n]|\\\\.)*\\x27";
+    var S_BT = "\\x60(?:[^\\x60\\\\]|\\\\.)*\\x60";
+    var NUM = "\\b(?:0[xX][0-9a-fA-F]+|\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\b";
+    var C_LINE = "//[^\\n]*";
+    var C_BLK = "/\\*[\\s\\S]*?\\*/";
+    var HASH = "#[^\\n]*";
+    var SQL_LINE = "--[^\\n]*";
+    var HTML_COMMENT = "<!--[\\s\\S]*?-->";
+    var PY_TRI = "(?:\"\"\"[\\s\\S]*?\"\"\"|\\x27\\x27\\x27[\\s\\S]*?\\x27\\x27\\x27)";
+    var PY_STR = "(?:[rfbuRFBU]{0,2})(?:\"(?:[^\"\\\\\\n]|\\\\.)*\"|\\x27(?:[^\\x27\\\\\\n]|\\\\.)*\\x27)";
+    var CSS_NUM = "\\b\\d+(?:\\.\\d+)?(?:[a-zA-Z%]*)\\b";
+    var HEX = "#[0-9a-fA-F]{3,8}\\b";
+    var AT = "@[\\w-]+";
+    var PROP = "[\\w-]+(?=\\s*:)";
+    var TAG = "</?[\\w-]+|/?>";
+    var ATTR = "[\\w-]+(?==)";
+    var VAR = "\\$(?:\\{[\\w]+\\}|[\\w]+)";
+    var VAR_PHP = "\\$\\w+";
+    var DECORATOR = "@[\\w.]+";
+    var IMPORTANT = "!important\\b";
+    var FUNC = "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()";
+    var FUNC_PY = "\\b[A-Za-z_][\\w]*(?=\\s*\\()";
+    var CLASS = "\\b[A-Z][\\w$]*\\b";
+    var YAML_KEY = "^\\s*(?:-\\s+)?[\\w.@-]+(?=\\s*:)";
+
+    function kwWord(kw) { return '\\b(?:' + kw.replace(/\s+/g, '|') + ')\\b'; }
+
+    var JS_KW = 'break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new return static super switch this throw try typeof var void while with yield async await of get set null undefined true false';
+    var PY_KW = 'and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield True False None self';
+    var SH_KW = 'if then elif else fi for while do done case esac function select in until return exit set unset export readonly local shift source';
+    var SQL_KW = 'select from where insert into update delete create drop alter table index view join left right inner outer full on as and or not null group by order having limit offset union all distinct values set primary key foreign references default like between is in exists asc desc';
+    var C_KW = 'auto break case const continue default do double else enum extern float for goto if int long register return short signed sizeof static struct switch typedef union unsigned void volatile while';
+    var GO_KW = 'break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var';
+    var RUST_KW = 'as async await break const continue crate dyn else enum extern fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait type union unsafe use where while';
+    var JAVA_KW = 'abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for if implements import instanceof int interface long native new package private protected public return short static strictfp super switch synchronized this throw throws transient try void volatile while';
+    var RB_KW = 'begin case class def do else elsif end ensure for if module next nil not or redo rescue retry return self super then true false undef unless until when while yield';
+    var PHP_KW = 'abstract and array as break callable case catch class clone const continue declare default do echo else elseif empty enddeclare endfor endforeach endif endswitch endwhile extends final finally fn for foreach function global if implements include instanceof insteadof interface isset list namespace new or print private protected public require return static switch throw trait try unset use var while xor yield';
+
+    function cFamily(kw) {
+      return makeHl([
+        ['comment', C_LINE + '|' + C_BLK],
+        ['string', S_BT + '|' + S_DQ + '|' + S_SQ],
+        ['number', NUM],
+        ['keyword', kwWord(kw)],
+        ['function', FUNC],
+        ['class', CLASS],
+      ]);
+    }
+
+    var HL_ENGINES = {
+      js: makeHl([
+        ['comment', C_LINE + '|' + C_BLK],
+        ['string', S_BT + '|' + S_DQ + '|' + S_SQ],
+        ['number', NUM],
+        ['keyword', kwWord(JS_KW)],
+        ['builtin', '\\b(?:console|Math|JSON|Promise|Array|Object|String|Number|Boolean|RegExp|Date|Map|Set|WeakMap|WeakSet|Symbol|BigInt|Infinity|NaN|window|document|process|require|module|exports|setTimeout|clearTimeout|fetch|globalThis)\\b'],
+        ['function', FUNC],
+        ['class', CLASS],
+      ]),
+      py: makeHl([
+        ['comment', HASH],
+        ['string', PY_TRI + '|' + PY_STR],
+        ['number', NUM],
+        ['keyword', kwWord(PY_KW)],
+        ['builtin', '\\b(?:print|len|range|enumerate|zip|map|filter|int|str|float|bool|list|dict|set|tuple|type|isinstance|super|open|input|repr|format|sorted|reversed|sum|min|max|abs|round|any|all|next|iter|dir|vars|getattr|setattr|hasattr|id|hash|bytes|bytearray|complex|frozenset|object|classmethod|staticmethod|property|Exception|ValueError|TypeError|KeyError|IndexError|ImportError|RuntimeError|StopIteration)\\b'],
+        ['decorator', DECORATOR],
+        ['function', FUNC_PY],
+      ]),
+      css: makeHl([
+        ['comment', C_BLK],
+        ['string', S_DQ + '|' + S_SQ],
+        ['atrule', AT],
+        ['property', PROP],
+        ['number', CSS_NUM],
+        ['hex', HEX],
+        ['important', IMPORTANT],
+      ]),
+      html: makeHl([
+        ['comment', HTML_COMMENT],
+        ['string', S_DQ + '|' + S_SQ],
+        ['tag', TAG],
+        ['attr', ATTR],
+      ]),
+      sh: makeHl([
+        ['comment', HASH],
+        ['string', S_DQ + '|' + S_SQ + '|' + S_BT],
+        ['variable', VAR],
+        ['number', NUM],
+        ['keyword', kwWord(SH_KW)],
+      ]),
+      yaml: makeHl([
+        ['comment', HASH],
+        ['string', S_DQ + '|' + S_SQ],
+        ['number', NUM],
+        ['bool', '\\b(?:true|false|null|yes|no|on|off)\\b'],
+        ['key', YAML_KEY],
+      ], 'gm'),
+      sql: makeHl([
+        ['comment', SQL_LINE + '|' + C_BLK],
+        ['string', S_SQ + '|' + S_DQ],
+        ['number', NUM],
+        ['keyword', kwWord(SQL_KW)],
+        ['function', FUNC_PY],
+      ], 'gi'),
+      json: makeHl([
+        ['string', S_DQ],
+        ['number', NUM],
+        ['bool', '\\b(?:true|false|null)\\b'],
+      ]),
+      c: cFamily(C_KW),
+      cpp: cFamily(C_KW),
+      go: cFamily(GO_KW),
+      rust: cFamily(RUST_KW),
+      java: cFamily(JAVA_KW),
+      rb: makeHl([
+        ['comment', HASH],
+        ['string', S_DQ + '|' + S_SQ],
+        ['number', NUM],
+        ['keyword', kwWord(RB_KW)],
+        ['function', FUNC_PY],
+        ['class', CLASS],
+      ]),
+      php: makeHl([
+        ['comment', C_LINE + '|' + C_BLK + '|' + HASH],
+        ['string', S_DQ + '|' + S_SQ],
+        ['variable', VAR_PHP],
+        ['number', NUM],
+        ['keyword', kwWord(PHP_KW)],
+        ['function', FUNC_PY],
+      ]),
+    };
+
+    var HL_LANG_MAP = {
+      js: 'js', mjs: 'js', cjs: 'js', jsx: 'js', javascript: 'js',
+      ts: 'js', tsx: 'js', mts: 'js', cts: 'js', typescript: 'js',
+      json: 'json', jsonc: 'json', json5: 'js',
+      py: 'py', python: 'py', pyw: 'py',
+      rb: 'rb', ruby: 'rb',
+      go: 'go', golang: 'go',
+      rs: 'rust', rust: 'rust',
+      java: 'java',
+      c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp', cs: 'c', csharp: 'c',
+      kotlin: 'c', kt: 'c', swift: 'c',
+      php: 'php',
+      yaml: 'yaml', yml: 'yaml', toml: 'sh', ini: 'sh', conf: 'sh', properties: 'sh', env: 'sh',
+      md: 'md', markdown: 'md', mdx: 'md',
+      html: 'html', htm: 'html', xhtml: 'html', vue: 'html', xml: 'html', svg: 'html',
+      css: 'css', scss: 'css', less: 'css',
+      sql: 'sql',
+      lua: 'c',
+      sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', fish: 'sh',
+    };
+
+    var HL_LANG_NAMES = {
+      js: 'JavaScript', py: 'Python', css: 'CSS', html: 'HTML/XML', sh: 'Shell',
+      yaml: 'YAML', sql: 'SQL', c: 'C/C++', cpp: 'C++', go: 'Go', rust: 'Rust',
+      java: 'Java', rb: 'Ruby', php: 'PHP', json: 'JSON', plain: 'Text',
+    };
+
+    function hlLangOf(hint) {
+      var h = String(hint || '').toLowerCase();
+      if (h.charAt(0) === '.') h = h.slice(1);
+      return HL_LANG_MAP[h] || 'plain';
+    }
+
+    function hlLangLabel(hint) { return HL_LANG_NAMES[hlLangOf(hint)] || 'Text'; }
+
+    function highlightCode(src, hint) {
+      var fn = HL_ENGINES[hlLangOf(hint)];
+      return fn ? fn(String(src)) : escHtml(src);
+    }
+
+    // Shared minimal Markdown → HTML renderer (portable JS, no template literals).
+    // Backticks are written as \x60 so the file can be inlined verbatim into the
+    // standalone page's String.raw template. Fenced code blocks are highlighted via
+    // highlightCode from shared/highlight.js.
+    function mdEscape(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function mdInline(s) {
+      s = s.replace(/\x60([^\x60]+)\x60/g, function (m, c) { return '<code>' + c + '</code>'; });
+      s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img alt="$1" src="$2">');
+      s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+      s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+      return s;
+    }
+
+    function mdToHtml(src) {
+      var lines = String(src || '').replace(/\r\n/g, '\n').split('\n');
+      var out = [];
+      var i = 0;
+      while (i < lines.length) {
+        var line = lines[i];
+        if (/^\s*\x60\x60\x60/.test(line)) {
+          var fence = /^\s*\x60\x60\x60([\w+-]*)/.exec(line);
+          var langHint = fence ? fence[1] : '';
+          var buf = [];
+          i += 1;
+          while (i < lines.length && !/^\s*\x60\x60\x60/.test(lines[i])) { buf.push(lines[i]); i += 1; }
+          i += 1;
+          var codeText = buf.join('\n');
+          out.push('<pre><code>' + highlightCode(codeText, langHint) + '</code></pre>');
+          continue;
+        }
+        var h = /^(#{1,6})\s+(.*)$/.exec(line);
+        if (h) {
+          var lv = h[1].length;
+          out.push('<h' + lv + '>' + mdInline(mdEscape(h[2])) + '</h' + lv + '>');
+          i += 1;
+          continue;
+        }
+        if (/^\s*(---+|\*\*\*+|___+)\s*$/.test(line)) { out.push('<hr>'); i += 1; continue; }
+        if (/^\s*>\s?/.test(line)) {
+          var q = [];
+          while (i < lines.length && /^\s*>\s?/.test(lines[i])) { q.push(lines[i].replace(/^\s*>\s?/, '')); i += 1; }
+          out.push('<blockquote>' + mdInline(mdEscape(q.join(' '))) + '</blockquote>');
+          continue;
+        }
+        if (/^\s*[-*+]\s+/.test(line)) {
+          var lis = [];
+          while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { lis.push(mdInline(mdEscape(lines[i].replace(/^\s*[-*+]\s+/, '')))); i += 1; }
+          out.push('<ul>' + lis.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul>');
+          continue;
+        }
+        if (/^\s*\d+\.\s+/.test(line)) {
+          var lis2 = [];
+          while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { lis2.push(mdInline(mdEscape(lines[i].replace(/^\s*\d+\.\s+/, '')))); i += 1; }
+          out.push('<ol>' + lis2.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ol>');
+          continue;
+        }
+        if (line.trim() === '') { i += 1; continue; }
+        out.push('<p>' + mdInline(mdEscape(line)) + '</p>');
+        i += 1;
+      }
+      return out.join('\n');
+    }
+
+
     const basename = (p) => {
       const parts = String(p).split('/')
       return parts[parts.length - 1] || p
-    }
-
-    // Preview type by extension (mirrors the host's kindOf), used by the file
-    // tree so a plain path can still pick the right renderer.
-    const EXT_IMAGE = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1, svg: 1, bmp: 1, ico: 1, avif: 1 }
-    const EXT_MARKDOWN = { md: 1, markdown: 1, mdx: 1, mdown: 1 }
-    const EXT_HTML = { html: 1, htm: 1, xhtml: 1 }
-    const extType = (path) => {
-      const m = /\.([^.]+)$/.exec(String(path || ''))
-      const ext = m ? m[1].toLowerCase() : ''
-      if (EXT_IMAGE[ext]) return 'image'
-      if (EXT_MARKDOWN[ext]) return 'markdown'
-      if (EXT_HTML[ext]) return 'html'
-      return 'text'
     }
 
     // The current session id, read from the client sessions store. The file
@@ -211,6 +492,8 @@ window.__ModuleLoader__.load({
       return s
     }
 
+
+
     styles.insert(`
 /* Layout push: reserve space for the popout panel so the conversation column
    yields instead of being covered (same technique as better-sidebar's right
@@ -306,7 +589,10 @@ header:has([data-slot="conversation.session.header.utilities"]) {
 .artifacts-corner-btn:hover { color: var(--dsw-alias-label-primary); }
 .artifacts-item { display: flex; align-items: stretch; padding: 0; cursor: default; border-bottom: 1px solid var(--dsw-alias-border-l2); }
 .artifacts-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.artifacts-item.is-active { background: var(--dsw-alias-interactive-bg-hover); }
+/* Selected artifact: a left accent bar (list-item language) keeps it visually
+   distinct from the file tree's rounded full-fill selection, so a lone selected
+   artifact never reads as a file-tree row. */
+.artifacts-item.is-active { background: var(--dsw-alias-interactive-bg-hover); box-shadow: inset 3px 0 0 var(--dsw-alias-state-business-primary); }
 .artifacts-item-main { flex: 1; min-width: 0; text-align: left; padding: 9px 12px; border: none; background: transparent; color: inherit; cursor: pointer; font: inherit; }
 .artifacts-item-actions { display: flex; align-items: center; gap: 2px; padding-right: 6px; opacity: 0; }
 .artifacts-item:hover .artifacts-item-actions { opacity: 1; }
@@ -349,8 +635,9 @@ header:has([data-slot="conversation.session.header.utilities"]) {
 .artifacts-splitter:hover::after, .artifacts-splitter.artifacts-splitting::after { background: var(--dsw-alias-interactive-bg-hover-accent); }
 .artifacts-splitter.artifacts-splitting { user-select: none; }
 
-/* Tabs (产物 / 文件树) */
-.artifacts-tabs { flex: none; display: flex; align-items: stretch; height: 32px; border-bottom: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); }
+/* Tabs (产物 / 文件树). The bottom border is the divider between the tab row
+   (including the「文件树」label) and the artifact/file list below it. */
+.artifacts-tabs { flex: none; display: flex; align-items: stretch; height: 32px; border-bottom: 2px solid #fff; background: var(--dsw-alias-bg-layer-1); }
 .artifacts-tab { flex: 1; border: none; background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 12px; cursor: pointer; border-right: 1px solid var(--dsw-alias-border-l1); }
 .artifacts-tab:hover { background: var(--dsw-alias-interactive-bg-hover-accent); }
 .artifacts-tab.is-active { color: var(--dsw-alias-label-primary); background: transparent; }
@@ -404,6 +691,35 @@ header:has([data-slot="conversation.session.header.utilities"]) {
 .artifacts-item.is-delete-marked .artifacts-item-actions { opacity: 1; }
 .artifacts-delete-x { color: var(--dsw-alias-state-error-primary); font-size: 16px; font-weight: 700; line-height: 1; }
 .artifacts-delete-x:hover { background: rgba(236,19,19,0.12); color: var(--dsw-alias-state-error-primary); }
+
+/* Code preview (syntax-highlighted via DSH's Shiki — token colors come from
+   the app's global --shiki-token-* palette, matching the rest of DSH) */
+.artifacts-code { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.artifacts-code-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.artifacts-code-lang { font-size: 11px; font-weight: 600; color: var(--dsw-alias-label-secondary); padding: 1px 8px; border-radius: 4px; background: var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-layer-1)); }
+.artifacts-code-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: flex-start; background: var(--shiki-background, var(--dsw-alias-markdown-code-block, var(--dsw-alias-bg-layer-1))); }
+.artifacts-code-gutter { flex: none; min-width: 3em; margin: 0; padding: 12px 10px 12px 12px; text-align: right; color: var(--dsw-alias-label-tertiary); border-right: 1px solid var(--dsw-alias-border-l1); position: sticky; left: 0; user-select: none; background: var(--shiki-background, var(--dsw-alias-markdown-code-block, var(--dsw-alias-bg-layer-1))); font: 12px/1.6 var(--dsh-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); white-space: pre; }
+.artifacts-code-pre { flex: 1; margin: 0; padding: 12px; background: var(--shiki-background, var(--dsw-alias-markdown-code-block, var(--dsw-alias-bg-layer-1))); color: var(--shiki-foreground, var(--dsw-alias-label-primary)); font: 12px/1.6 var(--dsh-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); white-space: pre; }
+.artifacts-code-pre code { font: inherit; color: inherit; }
+.artifacts-code-line { display: block; }
+
+/* Token colors for the shared self-contained highlighter (markdown fenced
+   code blocks). Palette matches the standalone page + DSH's --shiki-* hues. */
+.tok-comment { color: #868e96; }
+.tok-string { color: #2f9e44; }
+.tok-number, .tok-bool, .tok-variable, .tok-hex, .tok-attr { color: #e8590c; }
+.tok-keyword, .tok-important, .tok-atrule { color: #d6336c; }
+.tok-function, .tok-decorator { color: #6741d9; }
+.tok-class, .tok-builtin, .tok-tag, .tok-key { color: #1971c2; }
+.tok-property { color: #495057; }
+body[data-ds-dark-theme] .tok-comment { color: #adb5bd; }
+body[data-ds-dark-theme] .tok-string { color: #69db7c; }
+body[data-ds-dark-theme] .tok-number, body[data-ds-dark-theme] .tok-bool, body[data-ds-dark-theme] .tok-variable, body[data-ds-dark-theme] .tok-hex, body[data-ds-dark-theme] .tok-attr { color: #ffa94d; }
+body[data-ds-dark-theme] .tok-keyword, body[data-ds-dark-theme] .tok-important, body[data-ds-dark-theme] .tok-atrule { color: #faa2c1; }
+body[data-ds-dark-theme] .tok-function, body[data-ds-dark-theme] .tok-decorator { color: #b197fc; }
+body[data-ds-dark-theme] .tok-class, body[data-ds-dark-theme] .tok-builtin, body[data-ds-dark-theme] .tok-tag, body[data-ds-dark-theme] .tok-key { color: #74c0fc; }
+body[data-ds-dark-theme] .tok-property { color: #ced4da; }
+
 `)
 
     const PanelIcon = (size) => React.createElement('svg', {
@@ -420,104 +736,6 @@ header:has([data-slot="conversation.session.header.utilities"]) {
       }),
     )
 
-    const mdEscape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-    const mdInline = (s) => {
-      s = s.replace(/`([^`]+)`/g, (m, c) => '<code>' + c + '</code>')
-      s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img alt="$1" src="$2">')
-      s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-      s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
-      return s
-    }
-    const mdToHtml = (src) => {
-      const lines = String(src || '').replace(/\r\n/g, '\n').split('\n')
-      const out = []
-      let i = 0
-      while (i < lines.length) {
-        const line = lines[i]
-        if (/^\s*```/.test(line)) {
-          const buf = []
-          i += 1
-          while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i += 1 }
-          i += 1
-          out.push('<pre><code>' + mdEscape(buf.join('\n')) + '</code></pre>')
-          continue
-        }
-        const h = /^(#{1,6})\s+(.*)$/.exec(line)
-        if (h) { const lv = h[1].length; out.push('<h' + lv + '>' + mdInline(mdEscape(h[2])) + '</h' + lv + '>'); i += 1; continue }
-        if (/^\s*(---+|\*\*\*+|___+)\s*$/.test(line)) { out.push('<hr>'); i += 1; continue }
-        if (/^\s*>\s?/.test(line)) {
-          const q = []
-          while (i < lines.length && /^\s*>\s?/.test(lines[i])) { q.push(lines[i].replace(/^\s*>\s?/, '')); i += 1 }
-          out.push('<blockquote>' + mdInline(mdEscape(q.join(' '))) + '</blockquote>')
-          continue
-        }
-        if (/^\s*[-*+]\s+/.test(line)) {
-          const lis = []
-          while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { lis.push(mdInline(mdEscape(lines[i].replace(/^\s*[-*+]\s+/, '')))); i += 1 }
-          out.push('<ul>' + lis.map((x) => '<li>' + x + '</li>').join('') + '</ul>')
-          continue
-        }
-        if (/^\s*\d+\.\s+/.test(line)) {
-          const lis2 = []
-          while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { lis2.push(mdInline(mdEscape(lines[i].replace(/^\s*\d+\.\s+/, '')))); i += 1 }
-          out.push('<ol>' + lis2.map((x) => '<li>' + x + '</li>').join('') + '</ol>')
-          continue
-        }
-        if (line.trim() === '') { i += 1; continue }
-        out.push('<p>' + mdInline(mdEscape(line)) + '</p>')
-        i += 1
-      }
-      return out.join('\n')
-    }
-
-    const renderDiff = (diff) => {
-      const children = []
-      if (diff && diff.before != null && diff.before !== '') {
-        children.push(React.createElement('div', { key: 'del', className: 'artifacts-diff-block artifacts-diff-del' },
-          React.createElement('div', { className: 'artifacts-diff-label' }, '- 删除'),
-          React.createElement('pre', { className: 'artifacts-diff-pre' }, diff.before),
-        ))
-      }
-      children.push(React.createElement('div', { key: 'add', className: 'artifacts-diff-block artifacts-diff-add' },
-        React.createElement('div', { className: 'artifacts-diff-label' }, '+ 新增'),
-        React.createElement('pre', { className: 'artifacts-diff-pre' }, diff && diff.after != null ? diff.after : ''),
-      ))
-      return React.createElement('div', { className: 'artifacts-diff' }, children)
-    }
-
-    const renderPreview = (p) => {
-      if (p.loading) return React.createElement('div', { className: 'artifacts-hint' }, '加载中…')
-      if (p.ok === false) return React.createElement('div', { className: 'artifacts-error' }, p.error || '读取失败')
-      const type = p.type || 'text'
-      const body = []
-      if (type === 'image') {
-        body.push(React.createElement('img', {
-          key: 'img', className: 'artifacts-img',
-          src: '/popout-sidebar/media?path=' + encodeURIComponent(p.path || ''),
-          alt: p.path || '',
-        }))
-      } else if (type === 'html') {
-        body.push(React.createElement('iframe', {
-          key: 'iframe', className: 'artifacts-iframe',
-          sandbox: 'allow-scripts', srcDoc: p.content || '', title: p.path || '',
-        }))
-      } else if (type === 'markdown') {
-        body.push(React.createElement('div', {
-          key: 'md', className: 'artifacts-markdown',
-          dangerouslySetInnerHTML: { __html: mdToHtml(p.content) },
-        }))
-      } else {
-        body.push(React.createElement('pre', { key: 'pre', className: 'artifacts-pre' }, p.content))
-        if (p.truncated) body.push(React.createElement('div', { key: 'trunc', className: 'artifacts-diff-label' }, '(truncated preview)'))
-      }
-      if (p.diff) body.unshift(renderDiff(p.diff))
-      return React.createElement('div', { className: 'artifacts-preview-body' }, body)
-    }
-
-    // Inline SVG icons replicating the DSH primitives icons better-sidebar uses
-    // (IconFolderClose16 / IconFolderOpen16 / IconCodeOutline16 /
-    // IconRefreshOutline16), drawn with `currentColor` so they follow the theme.
     const FolderClosedIcon = (size) => React.createElement('svg', {
       width: size, height: size, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
     }, React.createElement('path', {
@@ -548,6 +766,105 @@ header:has([data-slot="conversation.session.header.utilities"]) {
     // File tree (文件树): lazy-loaded recursive directory browser styled like
     // better-sidebar's explorer — rounded rows, folder/file icons, a hover
     // `@引用` pill, and a header with the root name + refresh.
+
+
+    const renderDiff = (diff) => {
+      const children = []
+      if (diff && diff.before != null && diff.before !== '') {
+        children.push(React.createElement('div', { key: 'del', className: 'artifacts-diff-block artifacts-diff-del' },
+          React.createElement('div', { className: 'artifacts-diff-label' }, '- 删除'),
+          React.createElement('pre', { className: 'artifacts-diff-pre' }, diff.before),
+        ))
+      }
+      children.push(React.createElement('div', { key: 'add', className: 'artifacts-diff-block artifacts-diff-add' },
+        React.createElement('div', { className: 'artifacts-diff-label' }, '+ 新增'),
+        React.createElement('pre', { className: 'artifacts-diff-pre' }, diff && diff.after != null ? diff.after : ''),
+      ))
+      return React.createElement('div', { className: 'artifacts-diff' }, children)
+    }
+
+    // Map file extensions to DSH's Shiki language ids (mirrors the client UI's
+    // LANG_ALIASES so the Shiki-powered CodeBlock resolves the same grammars).
+    const LANG_BY_EXT = {
+      js: 'js', mjs: 'js', cjs: 'js', jsx: 'jsx', ts: 'ts', tsx: 'tsx', mts: 'ts', cts: 'ts',
+      json: 'json', jsonc: 'jsonc', json5: 'js',
+      py: 'py', pyw: 'py', rb: 'rb', ruby: 'rb', go: 'go', rs: 'rust', rust: 'rust',
+      java: 'java', c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp', cs: 'cs',
+      kotlin: 'kotlin', kt: 'kotlin', swift: 'swift', php: 'php',
+      yaml: 'yaml', yml: 'yaml', toml: 'toml', ini: 'ini', conf: 'ini', properties: 'ini', env: 'ini',
+      md: 'md', markdown: 'md', mdx: 'mdx', html: 'html', htm: 'html', xhtml: 'html', vue: 'html',
+      css: 'css', scss: 'scss', less: 'less', sql: 'sql', xml: 'xml', svg: 'xml', lua: 'lua',
+      sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', fish: 'sh',
+    }
+    const LANG_NAMES = {
+      js: 'JavaScript', jsx: 'JSX', ts: 'TypeScript', tsx: 'TSX', json: 'JSON', jsonc: 'JSON',
+      py: 'Python', rb: 'Ruby', go: 'Go', rust: 'Rust', java: 'Java', c: 'C', cpp: 'C++',
+      cs: 'C#', kotlin: 'Kotlin', swift: 'Swift', php: 'PHP', yaml: 'YAML', toml: 'TOML',
+      ini: 'INI', md: 'Markdown', mdx: 'MDX', html: 'HTML', css: 'CSS', scss: 'SCSS',
+      less: 'Less', sql: 'SQL', xml: 'XML', lua: 'Lua', sh: 'Shell',
+    }
+    const langFromExt = (path) => LANG_BY_EXT[fileExt(path)] || ''
+
+    // Code preview with syntax highlighting. Uses DSH's own Shiki `CodeBlock`
+    // component when available (native look + copy button + language banner);
+    // otherwise falls back to a plain code view with line numbers + label.
+    const CodeView = (props) => {
+      const hl = (typeof primitives !== 'undefined' && primitives) ? primitives : null
+      const CodeBlockCmp = hl && typeof hl.CodeBlock === 'function' ? hl.CodeBlock : null
+      const code = String(props.code || '')
+      const lang = props.lang || ''
+      if (CodeBlockCmp) {
+        return React.createElement(CodeBlockCmp, { code, lang: lang || undefined })
+      }
+      const srcLines = code.replace(/\n$/, '').split('\n')
+      const gutter = srcLines.map((_, i) => String(i + 1)).join('\n')
+      return React.createElement('div', { className: 'artifacts-code' },
+        React.createElement('div', { className: 'artifacts-code-head' },
+          React.createElement('span', { className: 'artifacts-code-lang' }, LANG_NAMES[lang] || (lang || 'Text')),
+        ),
+        React.createElement('div', { className: 'artifacts-code-scroll' },
+          React.createElement('pre', { className: 'artifacts-code-gutter', 'aria-hidden': true }, gutter),
+          React.createElement('pre', { className: 'artifacts-code-pre' },
+            React.createElement('code', null, code),
+          ),
+        ),
+      )
+    }
+
+    const renderPreview = (p) => {
+      if (p.loading) return React.createElement('div', { className: 'artifacts-hint' }, '加载中…')
+      if (p.ok === false) return React.createElement('div', { className: 'artifacts-error' }, p.error || '读取失败')
+      const type = p.type || 'text'
+      const body = []
+      if (type === 'image') {
+        body.push(React.createElement('img', {
+          key: 'img', className: 'artifacts-img',
+          src: '/popout-sidebar/media?path=' + encodeURIComponent(p.path || ''),
+          alt: p.path || '',
+        }))
+      } else if (type === 'html') {
+        body.push(React.createElement('iframe', {
+          key: 'iframe', className: 'artifacts-iframe',
+          sandbox: 'allow-scripts', srcDoc: p.content || '', title: p.path || '',
+        }))
+      } else if (type === 'markdown') {
+        body.push(React.createElement('div', {
+          key: 'md', className: 'artifacts-markdown',
+          dangerouslySetInnerHTML: { __html: mdToHtml(p.content) },
+        }))
+      } else {
+        body.push(React.createElement(CodeView, { key: 'code', code: p.content, lang: langFromExt(p.path) }))
+        if (p.truncated) body.push(React.createElement('div', { key: 'trunc', className: 'artifacts-diff-label' }, '(truncated preview)'))
+      }
+      if (p.diff) body.unshift(renderDiff(p.diff))
+      return React.createElement('div', { className: 'artifacts-preview-body' }, body)
+    }
+
+    // Inline SVG icons replicating the DSH primitives icons better-sidebar uses
+    // (IconFolderClose16 / IconFolderOpen16 / IconCodeOutline16 /
+    // IconRefreshOutline16), drawn with `currentColor` so they follow the theme.
+
+
     const FileTree = (props) => {
       const [root, setRoot] = React.useState(null)
       const [children, setChildren] = React.useState({})
@@ -555,6 +872,7 @@ header:has([data-slot="conversation.session.header.utilities"]) {
       const [copiedPath, setCopiedPath] = React.useState(null)
       const [copiedLabel, setCopiedLabel] = React.useState('')
       const copyTimer = React.useRef(null)
+      const rootTimer = React.useRef(null)
 
       // Track the active session so the tree re-roots automatically when the
       // workspace changes (no manual refresh needed).
@@ -570,12 +888,26 @@ header:has([data-slot="conversation.session.header.utilities"]) {
         setChildren({})
         setExpanded({})
         setRoot(null)
-        host.call('artifacts.listDir', { sessionId: currentSessionId() }).then((res) => {
-          if (res && res.ok) setRoot({ path: res.path, entries: res.entries })
-        }).catch(() => {})
+        clearTimeout(rootTimer.current)
+        // A freshly switched-to workspace may not be resolvable on the host for
+        // a beat (its session is still loading/persisting). Retry briefly so the
+        // tree self-corrects instead of sitting on a stale or empty root.
+        const attempt = (tries) => {
+          host.call('artifacts.listDir', { sessionId: currentSessionId() }).then((res) => {
+            if (res && res.ok) {
+              setRoot({ path: res.path, entries: res.entries })
+            } else if (tries > 0) {
+              rootTimer.current = setTimeout(() => attempt(tries - 1), 400)
+            }
+          }).catch(() => {
+            if (tries > 0) rootTimer.current = setTimeout(() => attempt(tries - 1), 400)
+          })
+        }
+        attempt(3)
       }
 
       React.useEffect(() => { loadRoot() }, [sessionId])
+      React.useEffect(() => () => clearTimeout(rootTimer.current), [])
 
       const toggle = (path) => {
         const nextExpanded = Object.assign({}, expanded, { [path]: !expanded[path] })
@@ -1017,7 +1349,7 @@ header:has([data-slot="conversation.session.header.utilities"]) {
           }),
           React.createElement(SettingsToggle, {
             label: '自动刷新',
-            desc: '面板打开时定时拉取最新产物列表。',
+            desc: '开启后侧边栏展开时将即时同步并更新产物列表',
             value: settings.autoRefresh,
             onToggle: (v) => set('autoRefresh', v),
           }),
@@ -1051,6 +1383,8 @@ header:has([data-slot="conversation.session.header.utilities"]) {
         ),
       )
     }
+
+
 
     slots.inject('shell.overlay', () => slots.register(
       { name: 'shell.overlay', id: 'artifacts-sidebar-trigger', order: 40, label: 'Artifacts' },

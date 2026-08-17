@@ -38,7 +38,7 @@ dsh plugin --profile web add github:e2mcc/dsh-popout-sidebar
 - ↗️ **弹出为独立标签页**：一键把侧边栏弹出为独立网页标签页（`/popout-sidebar`），每 1.5s 自动刷新，可拖到另一块显示器上更大、更清晰地观看。
 - 🗂 **产物侧边栏**：实时列出代理通过 `write` / `edit` 创建或修改的文件，以及 `bash` / `pwsh` 命令在工作区里产生的文件（如脚本生成的图片）；列表与预览区之间的分界线可拖动调整。
 - 🌳 **文件树**：侧边栏与独立标签页内都有「文件树」，可浏览当前工作区目录（懒加载展开，点击文件即预览），并**实时跟随工作区切换**。
-- 👀 **多类型预览**：按文件类型预览——纯文本 / Markdown 渲染 / 图片 / HTML（沙箱 iframe），超长内容自动截断。
+- 👀 **多类型预览**：按文件类型预览——代码 / 纯文本（语法高亮 + 行号）、Markdown 渲染、图片、HTML（沙箱 iframe），超长内容自动截断。
 - 📝 **编辑差异**：`edit` 修改过的文件在预览里展示「删除 / 新增」改动片段对比。
 - 🔗 **复制 / 引用**：一键复制文件路径，或把 `@path` 引用写入会话输入框（悬浮在列表行）。
 - 🧭 **与其他 sidebar 兼容**：其他「侧边卡片」打开时，本侧边栏自动让位到其左侧，两者同时可见。
@@ -64,13 +64,33 @@ dsh plugin --profile web add github:e2mcc/dsh-popout-sidebar
 .
 ├── README.md
 ├── LICENSE
-├── package.json        # 静态 bundle 元数据（main / exports ./client / dsh.bundle / dsh.client）
-├── cordis.patch.yml    # bundle 挂载补丁（dsh plugin add 自动识别）
+├── package.json          # 静态 bundle 元数据（main / exports ./client / dsh.bundle / dsh.client）
+├── cordis.patch.yml      # bundle 挂载补丁（dsh plugin add 自动识别）
+├── scripts
+│   └── build.js          # 组装脚本：把 src/{shared,host,client} 拼成下面的两个单文件 bundle
 └── src
-    ├── index.js        # 静态 Host 入口：求值 host.js 主体并导出给 loader
-    ├── host.js         # Host 半主体：产物追踪 + webServer 路由（独立标签页）
-    └── client.js       # Client 半：按钮 + 浮动侧边栏面板（静态 client bundle）
+    ├── index.js          # 静态 Host 入口（ESM）：求值 host.js 主体并导出给 loader
+    ├── host.js           # ⚙️ 生成产物：Host 单文件（由 scripts/build.js 生成，勿手改）
+    ├── client.js         # ⚙️ 生成产物：Client 单文件 bundle（由 scripts/build.js 生成，勿手改）
+    ├── shared/           # 两端共享的可复用纯函数（可移植 JS，无模板字符串）
+    │   ├── ext.js        #   扩展名 → 预览类型（extType / fileExt）
+    │   ├── markdown.js   #   极简 Markdown → HTML（含代码块高亮）
+    │   └── highlight.js  #   零依赖语法高亮器（tok-* token）
+    ├── host/             # Host 半模块（Node 进程）
+    │   ├── body.js       #   骨架：inject / apply + 占位符
+    │   ├── core.js       #   常量 + 产物追踪 + 文件操作 + RPC
+    │   ├── page.js       #   独立标签页 HTML（内联 script 引用 shared）
+    │   └── routes.js     #   /popout-sidebar/* HTTP 路由
+    └── client/           # Client 半模块（浏览器）
+        ├── body.js       #   骨架：__ModuleLoader__ 工厂 + 占位符
+        ├── core.js       #   store / settings / 会话辅助
+        ├── styles.js     #   注入的 CSS
+        ├── icons.js      #   内联 SVG 图标
+        ├── preview.js    #   renderPreview / CodeView / diff
+        └── components.js #   FileTree / ArtifactsPanel / 设置面板
 ```
+
+> 修改 `src/shared/`、`src/host/`、`src/client/` 里的源码后，运行 `npm run build`（或 `node scripts/build.js`）重新生成 `src/host.js` 与 `src/client.js`，再提交。运行时 DSH 只加载这两个生成产物。
 
 ## 使用 / Usage
 
