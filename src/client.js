@@ -704,6 +704,22 @@ header:has([data-slot="conversation.session.header.utilities"]) {
         return () => { alive = false; if (dispose) dispose() }
       }, [open, settings.autoRefresh])
 
+      // Publish the current session id to localStorage so the standalone
+      // popout tab (which has no client session store) can root its file tree
+      // at the active workspace and follow workspace switches in real time.
+      React.useEffect(() => {
+        const KEY = 'dsh-popout-sidebar:session'
+        const write = () => {
+          try {
+            const sid = currentSessionId()
+            if (localStorage.getItem(KEY) !== sid) localStorage.setItem(KEY, sid || '')
+          } catch (e) {}
+        }
+        write()
+        const dispose = ctx.interval(write, 500)
+        return () => { if (dispose) dispose() }
+      }, [])
+
       // Panel width (px): at least `minPanelWidth`% of the window, wider via
       // dragging the left edge. `panelWidth` holds the drag result (px); null →
       // use the configured minimum.

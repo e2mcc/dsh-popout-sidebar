@@ -395,10 +395,19 @@ return {
     var MEDIA_URL = '/popout-sidebar/media';
     var LISTDIR_URL = '/popout-sidebar/listdir';
     var _sm = /[?&]sessionId=([^&]+)/.exec(location.search);
-    var sessionId = _sm ? decodeURIComponent(_sm[1]) : '';
+    var _urlSessionId = _sm ? decodeURIComponent(_sm[1]) : '';
+    var SESSION_KEY = 'dsh-popout-sidebar:session';
+    function currentSessionId() {
+      try {
+        var v = localStorage.getItem(SESSION_KEY);
+        if (v) return v;
+      } catch (e) {}
+      return _urlSessionId;
+    }
     function listdirUrl(path) {
       var q = [];
-      if (sessionId) q.push('sessionId=' + encodeURIComponent(sessionId));
+      var sid = currentSessionId();
+      if (sid) q.push('sessionId=' + encodeURIComponent(sid));
       if (path) q.push('path=' + encodeURIComponent(path));
       return LISTDIR_URL + (q.length ? '?' + q.join('&') : '');
     }
@@ -800,6 +809,21 @@ return {
     }
     load();
     setInterval(load, 1500);
+    // Follow the active session in real time: the main tab publishes the
+    // current session id to localStorage (SESSION_KEY); when it changes,
+    // re-root the file tree at the new workspace — same as the in-page sidebar.
+    var _lastTreeSession = currentSessionId();
+    function watchSession() {
+      var sid = currentSessionId();
+      if (sid !== _lastTreeSession) {
+        _lastTreeSession = sid;
+        if (treeRoot !== null) loadTreeRoot();
+      }
+    }
+    setInterval(watchSession, 1000);
+    window.addEventListener('storage', function (e) {
+      if (e.key === SESSION_KEY) watchSession();
+    });
     // Background tabs throttle setInterval, so a tab left in the background can
     // show stale artifacts for up to a minute. Refresh immediately whenever the
     // user returns to (or focuses) this tab.
