@@ -169,8 +169,9 @@ window.__ModuleLoader__.load({
     const SETTINGS_KEY = 'dsh-popout-sidebar:settings'
     const DEFAULT_SETTINGS = {
       autoRefresh: true,       // poll the artifact list while the panel is open
-      minPanelWidth: 30,       // minimum panel width as % of window width
+      minPanelWidth: 20,       // minimum panel width as % of window width
       showFileTree: true,      // show the 文件树 (file tree) tab in the panel
+      defaultOpen: true,       // expand the sidebar by default on load
     }
 
     function loadSettings() {
@@ -199,6 +200,10 @@ window.__ModuleLoader__.load({
         return () => { this.listeners = this.listeners.filter((f) => f !== fn) }
       },
     }
+
+    // Apply the "默认展开" preference once at startup, before any component
+    // mounts so the initial open/closed state matches the persisted setting.
+    store.open = !!settingsStore.get().defaultOpen
 
     const useSettings = () => {
       const [s, setS] = React.useState(settingsStore.get())
@@ -1004,6 +1009,12 @@ header:has([data-slot="conversation.session.header.utilities"]) {
       return React.createElement('div', { className: 'artifacts-settings' },
         React.createElement('p', { className: 'artifacts-setintro' }, '管理「Popout Sidebar」的显示与行为。'),
         React.createElement('div', { className: 'artifacts-setgroup' },
+          React.createElement(SettingsToggle, {
+            label: '默认展开',
+            desc: '页面加载后侧边栏默认展开；关闭则默认收起，点右上角图标再打开。',
+            value: settings.defaultOpen,
+            onToggle: (v) => set('defaultOpen', v),
+          }),
           React.createElement(SettingsToggle, {
             label: '自动刷新',
             desc: '面板打开时定时拉取最新产物列表。',
