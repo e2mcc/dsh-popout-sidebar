@@ -36,6 +36,12 @@ const ext = read('src/shared/ext.js')
 const markdown = read('src/shared/markdown.js')
 const highlight = read('src/shared/highlight.js')
 
+// ── pdf.js (vendored, served to the browser for the sidebar's custom
+//    renderer). Embedded into the host bundle as string literals so the
+//    single-file plugin stays self-contained (no CDN / network dependency).
+const pdfjsLib = read('src/vendor/pdfjs/pdf.min.js')
+const pdfjsWorker = read('src/vendor/pdfjs/pdf.worker.min.js')
+
 // ── Host ────────────────────────────────────────────────────────────────
 let host = read('src/host/body.js')
 const core = read('src/host/core.js')
@@ -51,6 +57,8 @@ host = replaceAll(host, '@@ext@@', indent(ext, 4))
 host = replaceAll(host, '@@core@@', core)
 host = replaceAll(host, '@@page@@', page)
 host = replaceAll(host, '@@routes@@', routes)
+host = replaceAll(host, '@@PDFJS_LIB@@', JSON.stringify(pdfjsLib))
+host = replaceAll(host, '@@PDFJS_WORKER@@', JSON.stringify(pdfjsWorker))
 assertNoMarkers(host, 'host.js')
 write('src/host.js', host)
 

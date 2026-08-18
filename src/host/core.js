@@ -5,7 +5,13 @@
     const MIME = {
       png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
       webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif',
+      pdf: 'application/pdf',
     }
+    // Vendored pdf.js (Mozilla, Apache-2.0) — embedded by scripts/build.js and
+    // served to the browser for the sidebar's custom PDF renderer. The standalone
+    // popout tab keeps the browser's native viewer instead.
+    const PDFJS_LIB = @@PDFJS_LIB@@
+    const PDFJS_WORKER = @@PDFJS_WORKER@@
     // Shell executors whose filesystem side effects are NOT visible as a
     // `write`/`edit` result. Snapshot-diff the workspace around these tools so
     // files they create or overwrite (e.g. `python3 make_chart.py` emitting a

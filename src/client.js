@@ -76,6 +76,7 @@ window.__ModuleLoader__.load({
     // template literals, so this file can be inlined verbatim into the host Node
     // scope, the client bundle, and the standalone page's String.raw inline script).
     var EXT_IMAGE = { png: 1, jpg: 1, jpeg: 1, gif: 1, webp: 1, svg: 1, bmp: 1, ico: 1, avif: 1 };
+    var EXT_PDF = { pdf: 1 };
     var EXT_MARKDOWN = { md: 1, markdown: 1, mdx: 1, mdown: 1 };
     var EXT_HTML = { html: 1, htm: 1, xhtml: 1 };
 
@@ -83,6 +84,7 @@ window.__ModuleLoader__.load({
       var m = /\.([^.]+)$/.exec(String(path || ''));
       var ext = m ? m[1].toLowerCase() : '';
       if (EXT_IMAGE[ext]) return 'image';
+      if (EXT_PDF[ext]) return 'pdf';
       if (EXT_MARKDOWN[ext]) return 'markdown';
       if (EXT_HTML[ext]) return 'html';
       return 'text';
@@ -599,9 +601,25 @@ header:has([data-slot="conversation.session.header.utilities"]) {
 .artifacts-minibtn { border: none; background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
 .artifacts-minibtn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .artifacts-notice { color: var(--dsw-alias-state-business-primary); font-size: 12px; }
-.artifacts-preview-body { flex: 1; min-height: 0; overflow-y: auto; }
+.artifacts-preview-body { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
 .artifacts-img { display: block; max-width: 100%; max-height: 70vh; object-fit: contain; margin: 12px; }
+/* iframe/embed are REPLACED elements: inset-0 without an explicit
+   width/height keeps their intrinsic (small) size, so use width/height 100%
+   instead. position:relative above is for the pdf.js renderer's absolute
+   canvas container (a non-replaced div, which DOES stretch with inset-0). */
 .artifacts-iframe { width: 100%; height: 100%; min-height: 360px; border: 0; background: #fff; }
+.artifacts-pdf { width: 100%; height: 100%; min-height: 360px; border: 0; background: #fff; display: block; }
+/* pdf.js renderer (sidebar): fills the preview area, no native toolbar. */
+.artifacts-pdfview { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; background: #525659; }
+.artifacts-pdfview-bar { flex: none; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 8px; background: var(--dsw-alias-bg-layer-1); border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.artifacts-pdfview-btn { min-width: 24px; height: 22px; border: 1px solid var(--dsw-alias-border-l2); background: transparent; color: var(--dsw-alias-label-secondary); border-radius: 5px; cursor: pointer; font: inherit; font-size: 13px; line-height: 1; padding: 0 6px; }
+.artifacts-pdfview-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.artifacts-pdfview-btn:disabled { opacity: .4; cursor: default; }
+.artifacts-pdfview-zoom { font-size: 12px; color: var(--dsw-alias-label-secondary); min-width: 40px; text-align: center; }
+.artifacts-pdfview-page { font-size: 12px; color: var(--dsw-alias-label-secondary); min-width: 44px; text-align: center; }
+.artifacts-pdfview-spacer { flex: 1; }
+.artifacts-pdfview-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.artifacts-pdfview-canvas { display: block; margin: 0 auto; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
 .artifacts-markdown { padding: 12px 14px; line-height: 1.6; word-wrap: break-word; font-size: 13px; }
 .artifacts-markdown h1, .artifacts-markdown h2, .artifacts-markdown h3, .artifacts-markdown h4, .artifacts-markdown h5, .artifacts-markdown h6 { margin: 14px 0 8px; line-height: 1.3; }
 .artifacts-markdown h1 { font-size: 1.45em; border-bottom: 1px solid var(--dsw-alias-border-l2); padding-bottom: 6px; }
@@ -831,6 +849,150 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       )
     }
 
+    // ── PDF preview (sidebar): custom pdf.js renderer ─────────────────────
+    // No native viewer toolbar; fit-to-width by default with zoom / page
+    // controls. Loads the vendored pdf.js served by the host (offline-safe).
+    let _pdfjsPromise = null
+    const loadPdfjs = () => {
+      if (typeof window === 'undefined') return Promise.reject(new Error('no window'))
+      if (window.pdfjsLib) {
+        try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/popout-sidebar/pdfjs/pdf.worker.min.js' } catch (e) {}
+        return Promise.resolve(window.pdfjsLib)
+      }
+      if (_pdfjsPromise) return _pdfjsPromise
+      _pdfjsPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script')
+        s.src = '/popout-sidebar/pdfjs/pdf.min.js'
+        s.async = true
+        s.onload = () => {
+          try {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/popout-sidebar/pdfjs/pdf.worker.min.js'
+            resolve(window.pdfjsLib)
+          } catch (e) { reject(e) }
+        }
+        s.onerror = () => { _pdfjsPromise = null; reject(new Error('pdf.js 加载失败')) }
+        document.head.appendChild(s)
+      })
+      return _pdfjsPromise
+    }
+
+    const PdfView = (props) => {
+      const path = props.path || ''
+      const [phase, setPhase] = React.useState('loading') // loading | ready | error
+      const [error, setError] = React.useState(null)
+      const [pageCount, setPageCount] = React.useState(0)
+      const [pageNo, setPageNo] = React.useState(1)
+      const [zoom, setZoom] = React.useState(1) // multiplier over fit-width
+      const [fitScale, setFitScale] = React.useState(null)
+      const scrollRef = React.useRef(null)
+      const canvasRef = React.useRef(null)
+      const docRef = React.useRef(null)
+      const taskRef = React.useRef(null)
+
+      // Load the document once per path.
+      React.useEffect(() => {
+        let alive = true
+        setPhase('loading'); setError(null); setPageCount(0); setPageNo(1); setZoom(1); setFitScale(null)
+        loadPdfjs().then((lib) => {
+          const url = '/popout-sidebar/media?path=' + encodeURIComponent(path)
+          return lib.getDocument({ url }).promise
+        }).then((doc) => {
+          if (!alive) { try { doc.destroy() } catch (e) {} return }
+          docRef.current = doc
+          setPageCount(doc.numPages || 0)
+          setPhase('ready')
+        }).catch((e) => {
+          if (alive) { setError(String((e && e.message) ? e.message : e)); setPhase('error') }
+        })
+        return () => {
+          alive = false
+          if (taskRef.current) { try { taskRef.current.cancel() } catch (e) {} }
+          if (docRef.current) { try { docRef.current.destroy() } catch (e) {} docRef.current = null }
+        }
+      }, [path])
+
+      // Measure the scroll area once to derive the fit-to-width scale (so the
+      // page exactly fills the visible width — no horizontal scrollbar).
+      React.useEffect(() => {
+        if (phase !== 'ready' || fitScale != null) return
+        const scroll = scrollRef.current
+        const doc = docRef.current
+        if (!scroll || !doc) return
+        let w = scroll.clientWidth
+        if (typeof window.getComputedStyle === 'function') {
+          try {
+            const cs = window.getComputedStyle(scroll)
+            w -= (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0)
+          } catch (e) {}
+        }
+        if (!w) return
+        doc.getPage(1).then((pageObj) => {
+          const vp = pageObj.getViewport({ scale: 1 })
+          if (vp && vp.width > 0) setFitScale(w / vp.width)
+        }).catch(() => {})
+      }, [phase, fitScale])
+
+      // Render the current page into the canvas.
+      React.useEffect(() => {
+        if (phase !== 'ready' || fitScale == null) return
+        const canvas = canvasRef.current
+        const doc = docRef.current
+        if (!canvas || !doc) return
+        let alive = true
+        doc.getPage(pageNo).then((pageObj) => {
+          if (!alive) return
+          const scale = fitScale * zoom
+          const viewport = pageObj.getViewport({ scale })
+          const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
+          canvas.width = Math.floor(viewport.width * dpr)
+          canvas.height = Math.floor(viewport.height * dpr)
+          canvas.style.width = Math.floor(viewport.width) + 'px'
+          canvas.style.height = Math.floor(viewport.height) + 'px'
+          const ctx = canvas.getContext('2d')
+          if (taskRef.current) { try { taskRef.current.cancel() } catch (e) {} }
+          taskRef.current = pageObj.render({
+            canvasContext: ctx,
+            viewport,
+            transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+          })
+        }).catch(() => {})
+        return () => { alive = false }
+      }, [phase, pageNo, zoom, fitScale])
+
+      const clampPage = (n) => Math.max(1, Math.min(pageCount || 1, n))
+      const goPage = (n) => setPageNo(clampPage(n))
+      const zoomBy = (f) => setZoom((z) => Math.max(0.25, Math.min(4, Math.round(z * f * 100) / 100)))
+
+      if (phase === 'loading') {
+        return React.createElement('div', { className: 'artifacts-pdfview' },
+          React.createElement('div', { className: 'artifacts-hint' }, '加载 PDF…'))
+      }
+      if (phase === 'error') {
+        // Fall back to the browser's native viewer if pdf.js cannot load.
+        return React.createElement('embed', {
+          className: 'artifacts-pdf',
+          src: '/popout-sidebar/media?path=' + encodeURIComponent(path),
+          type: 'application/pdf', title: path,
+        })
+      }
+
+      const disabled = pageCount <= 0
+      return React.createElement('div', { className: 'artifacts-pdfview' },
+        React.createElement('div', { className: 'artifacts-pdfview-bar' },
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '缩小', disabled, onClick: () => zoomBy(0.8) }, '−'),
+          React.createElement('span', { className: 'artifacts-pdfview-zoom' }, Math.round(zoom * 100) + '%'),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '放大', disabled, onClick: () => zoomBy(1.25) }, '＋'),
+          React.createElement('span', { className: 'artifacts-pdfview-spacer' }),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '上一页', disabled: disabled || pageNo <= 1, onClick: () => goPage(pageNo - 1) }, '‹'),
+          React.createElement('span', { className: 'artifacts-pdfview-page' }, pageNo + ' / ' + pageCount),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '下一页', disabled: disabled || pageNo >= pageCount, onClick: () => goPage(pageNo + 1) }, '›'),
+        ),
+        React.createElement('div', { className: 'artifacts-pdfview-scroll', ref: scrollRef },
+          React.createElement('canvas', { ref: canvasRef, className: 'artifacts-pdfview-canvas' }),
+        ),
+      )
+    }
+
     const renderPreview = (p) => {
       if (p.loading) return React.createElement('div', { className: 'artifacts-hint' }, '加载中…')
       if (p.ok === false) return React.createElement('div', { className: 'artifacts-error' }, p.error || '读取失败')
@@ -847,6 +1009,8 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
           key: 'iframe', className: 'artifacts-iframe',
           sandbox: 'allow-scripts', srcDoc: p.content || '', title: p.path || '',
         }))
+      } else if (type === 'pdf') {
+        body.push(React.createElement(PdfView, { key: 'pdf', path: p.path || '' }))
       } else if (type === 'markdown') {
         body.push(React.createElement('div', {
           key: 'md', className: 'artifacts-markdown',
@@ -1171,7 +1335,8 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       const openFile = (path, diff) => {
         const type = extType(path)
         const base = { path, type, diff: diff || null }
-        if (type === 'image') {
+        // Images and PDFs are served as binary media — no text read needed.
+        if (type === 'image' || type === 'pdf') {
           setPreview(Object.assign({}, base, { loading: false }))
           return
         }

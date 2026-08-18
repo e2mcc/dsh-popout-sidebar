@@ -61,6 +61,150 @@
       )
     }
 
+    // ── PDF preview (sidebar): custom pdf.js renderer ─────────────────────
+    // No native viewer toolbar; fit-to-width by default with zoom / page
+    // controls. Loads the vendored pdf.js served by the host (offline-safe).
+    let _pdfjsPromise = null
+    const loadPdfjs = () => {
+      if (typeof window === 'undefined') return Promise.reject(new Error('no window'))
+      if (window.pdfjsLib) {
+        try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/popout-sidebar/pdfjs/pdf.worker.min.js' } catch (e) {}
+        return Promise.resolve(window.pdfjsLib)
+      }
+      if (_pdfjsPromise) return _pdfjsPromise
+      _pdfjsPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script')
+        s.src = '/popout-sidebar/pdfjs/pdf.min.js'
+        s.async = true
+        s.onload = () => {
+          try {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/popout-sidebar/pdfjs/pdf.worker.min.js'
+            resolve(window.pdfjsLib)
+          } catch (e) { reject(e) }
+        }
+        s.onerror = () => { _pdfjsPromise = null; reject(new Error('pdf.js 加载失败')) }
+        document.head.appendChild(s)
+      })
+      return _pdfjsPromise
+    }
+
+    const PdfView = (props) => {
+      const path = props.path || ''
+      const [phase, setPhase] = React.useState('loading') // loading | ready | error
+      const [error, setError] = React.useState(null)
+      const [pageCount, setPageCount] = React.useState(0)
+      const [pageNo, setPageNo] = React.useState(1)
+      const [zoom, setZoom] = React.useState(1) // multiplier over fit-width
+      const [fitScale, setFitScale] = React.useState(null)
+      const scrollRef = React.useRef(null)
+      const canvasRef = React.useRef(null)
+      const docRef = React.useRef(null)
+      const taskRef = React.useRef(null)
+
+      // Load the document once per path.
+      React.useEffect(() => {
+        let alive = true
+        setPhase('loading'); setError(null); setPageCount(0); setPageNo(1); setZoom(1); setFitScale(null)
+        loadPdfjs().then((lib) => {
+          const url = '/popout-sidebar/media?path=' + encodeURIComponent(path)
+          return lib.getDocument({ url }).promise
+        }).then((doc) => {
+          if (!alive) { try { doc.destroy() } catch (e) {} return }
+          docRef.current = doc
+          setPageCount(doc.numPages || 0)
+          setPhase('ready')
+        }).catch((e) => {
+          if (alive) { setError(String((e && e.message) ? e.message : e)); setPhase('error') }
+        })
+        return () => {
+          alive = false
+          if (taskRef.current) { try { taskRef.current.cancel() } catch (e) {} }
+          if (docRef.current) { try { docRef.current.destroy() } catch (e) {} docRef.current = null }
+        }
+      }, [path])
+
+      // Measure the scroll area once to derive the fit-to-width scale (so the
+      // page exactly fills the visible width — no horizontal scrollbar).
+      React.useEffect(() => {
+        if (phase !== 'ready' || fitScale != null) return
+        const scroll = scrollRef.current
+        const doc = docRef.current
+        if (!scroll || !doc) return
+        let w = scroll.clientWidth
+        if (typeof window.getComputedStyle === 'function') {
+          try {
+            const cs = window.getComputedStyle(scroll)
+            w -= (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0)
+          } catch (e) {}
+        }
+        if (!w) return
+        doc.getPage(1).then((pageObj) => {
+          const vp = pageObj.getViewport({ scale: 1 })
+          if (vp && vp.width > 0) setFitScale(w / vp.width)
+        }).catch(() => {})
+      }, [phase, fitScale])
+
+      // Render the current page into the canvas.
+      React.useEffect(() => {
+        if (phase !== 'ready' || fitScale == null) return
+        const canvas = canvasRef.current
+        const doc = docRef.current
+        if (!canvas || !doc) return
+        let alive = true
+        doc.getPage(pageNo).then((pageObj) => {
+          if (!alive) return
+          const scale = fitScale * zoom
+          const viewport = pageObj.getViewport({ scale })
+          const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1
+          canvas.width = Math.floor(viewport.width * dpr)
+          canvas.height = Math.floor(viewport.height * dpr)
+          canvas.style.width = Math.floor(viewport.width) + 'px'
+          canvas.style.height = Math.floor(viewport.height) + 'px'
+          const ctx = canvas.getContext('2d')
+          if (taskRef.current) { try { taskRef.current.cancel() } catch (e) {} }
+          taskRef.current = pageObj.render({
+            canvasContext: ctx,
+            viewport,
+            transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null,
+          })
+        }).catch(() => {})
+        return () => { alive = false }
+      }, [phase, pageNo, zoom, fitScale])
+
+      const clampPage = (n) => Math.max(1, Math.min(pageCount || 1, n))
+      const goPage = (n) => setPageNo(clampPage(n))
+      const zoomBy = (f) => setZoom((z) => Math.max(0.25, Math.min(4, Math.round(z * f * 100) / 100)))
+
+      if (phase === 'loading') {
+        return React.createElement('div', { className: 'artifacts-pdfview' },
+          React.createElement('div', { className: 'artifacts-hint' }, '加载 PDF…'))
+      }
+      if (phase === 'error') {
+        // Fall back to the browser's native viewer if pdf.js cannot load.
+        return React.createElement('embed', {
+          className: 'artifacts-pdf',
+          src: '/popout-sidebar/media?path=' + encodeURIComponent(path),
+          type: 'application/pdf', title: path,
+        })
+      }
+
+      const disabled = pageCount <= 0
+      return React.createElement('div', { className: 'artifacts-pdfview' },
+        React.createElement('div', { className: 'artifacts-pdfview-bar' },
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '缩小', disabled, onClick: () => zoomBy(0.8) }, '−'),
+          React.createElement('span', { className: 'artifacts-pdfview-zoom' }, Math.round(zoom * 100) + '%'),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '放大', disabled, onClick: () => zoomBy(1.25) }, '＋'),
+          React.createElement('span', { className: 'artifacts-pdfview-spacer' }),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '上一页', disabled: disabled || pageNo <= 1, onClick: () => goPage(pageNo - 1) }, '‹'),
+          React.createElement('span', { className: 'artifacts-pdfview-page' }, pageNo + ' / ' + pageCount),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '下一页', disabled: disabled || pageNo >= pageCount, onClick: () => goPage(pageNo + 1) }, '›'),
+        ),
+        React.createElement('div', { className: 'artifacts-pdfview-scroll', ref: scrollRef },
+          React.createElement('canvas', { ref: canvasRef, className: 'artifacts-pdfview-canvas' }),
+        ),
+      )
+    }
+
     const renderPreview = (p) => {
       if (p.loading) return React.createElement('div', { className: 'artifacts-hint' }, '加载中…')
       if (p.ok === false) return React.createElement('div', { className: 'artifacts-error' }, p.error || '读取失败')
@@ -77,6 +221,8 @@
           key: 'iframe', className: 'artifacts-iframe',
           sandbox: 'allow-scripts', srcDoc: p.content || '', title: p.path || '',
         }))
+      } else if (type === 'pdf') {
+        body.push(React.createElement(PdfView, { key: 'pdf', path: p.path || '' }))
       } else if (type === 'markdown') {
         body.push(React.createElement('div', {
           key: 'md', className: 'artifacts-markdown',

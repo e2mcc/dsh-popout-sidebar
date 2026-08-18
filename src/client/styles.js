@@ -102,9 +102,25 @@ header:has([data-slot="conversation.session.header.utilities"]) {
 .artifacts-minibtn { border: none; background: transparent; color: var(--dsw-alias-label-tertiary); cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
 .artifacts-minibtn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .artifacts-notice { color: var(--dsw-alias-state-business-primary); font-size: 12px; }
-.artifacts-preview-body { flex: 1; min-height: 0; overflow-y: auto; }
+.artifacts-preview-body { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
 .artifacts-img { display: block; max-width: 100%; max-height: 70vh; object-fit: contain; margin: 12px; }
+/* iframe/embed are REPLACED elements: inset-0 without an explicit
+   width/height keeps their intrinsic (small) size, so use width/height 100%
+   instead. position:relative above is for the pdf.js renderer's absolute
+   canvas container (a non-replaced div, which DOES stretch with inset-0). */
 .artifacts-iframe { width: 100%; height: 100%; min-height: 360px; border: 0; background: #fff; }
+.artifacts-pdf { width: 100%; height: 100%; min-height: 360px; border: 0; background: #fff; display: block; }
+/* pdf.js renderer (sidebar): fills the preview area, no native toolbar. */
+.artifacts-pdfview { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; background: #525659; }
+.artifacts-pdfview-bar { flex: none; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 8px; background: var(--dsw-alias-bg-layer-1); border-bottom: 1px solid var(--dsw-alias-border-l2); }
+.artifacts-pdfview-btn { min-width: 24px; height: 22px; border: 1px solid var(--dsw-alias-border-l2); background: transparent; color: var(--dsw-alias-label-secondary); border-radius: 5px; cursor: pointer; font: inherit; font-size: 13px; line-height: 1; padding: 0 6px; }
+.artifacts-pdfview-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.artifacts-pdfview-btn:disabled { opacity: .4; cursor: default; }
+.artifacts-pdfview-zoom { font-size: 12px; color: var(--dsw-alias-label-secondary); min-width: 40px; text-align: center; }
+.artifacts-pdfview-page { font-size: 12px; color: var(--dsw-alias-label-secondary); min-width: 44px; text-align: center; }
+.artifacts-pdfview-spacer { flex: 1; }
+.artifacts-pdfview-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.artifacts-pdfview-canvas { display: block; margin: 0 auto; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
 .artifacts-markdown { padding: 12px 14px; line-height: 1.6; word-wrap: break-word; font-size: 13px; }
 .artifacts-markdown h1, .artifacts-markdown h2, .artifacts-markdown h3, .artifacts-markdown h4, .artifacts-markdown h5, .artifacts-markdown h6 { margin: 14px 0 8px; line-height: 1.3; }
 .artifacts-markdown h1 { font-size: 1.45em; border-bottom: 1px solid var(--dsw-alias-border-l2); padding-bottom: 6px; }

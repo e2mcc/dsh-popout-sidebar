@@ -88,12 +88,15 @@
   .preview { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .preview .bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--p-border-l2); color: var(--p-text-secondary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .preview .bar .path { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .preview .area { flex: 1; min-height: 0; overflow: auto; }
+  .preview .area { flex: 1; min-height: 0; overflow: auto; position: relative; }
   .preview pre { margin: 0; padding: 16px; background: var(--p-code-bg); font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; color: var(--p-code-fg); }
   .preview .hint { padding: 32px; color: var(--p-text-tertiary); text-align: center; }
   .preview .err { padding: 24px; color: var(--p-error); font-family: ui-monospace, monospace; }
   .preview-img { display: block; max-width: 100%; max-height: 80vh; object-fit: contain; margin: 16px; }
+  /* iframe/embed are REPLACED elements: inset-0 keeps their intrinsic
+     (small) size, so give them an explicit width/height 100% to fill the area. */
   .preview-iframe { width: 100%; height: 100%; min-height: 400px; border: 0; background: #fff; }
+  .preview-pdf { width: 100%; height: 100%; min-height: 480px; border: 0; background: #fff; display: block; }
   .markdown { padding: 16px 20px; line-height: 1.6; word-wrap: break-word; }
   .markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 { margin: 16px 0 8px; line-height: 1.3; }
   .markdown h1 { font-size: 1.5em; border-bottom: 1px solid var(--p-border-l2); padding-bottom: 6px; }
@@ -373,6 +376,18 @@
         img.alt = path;
         img.addEventListener('error', function () { area.textContent = ''; area.appendChild(errNode('图片加载失败')); });
         area.appendChild(img);
+        if (diff) area.appendChild(diffNode(diff));
+        return;
+      }
+      if (type === 'pdf') {
+        // Standalone tab: use the browser's NATIVE PDF viewer (with its own
+        // toolbar) — the sidebar uses a custom pdf.js renderer instead.
+        // #zoom=page-width fits the page to the box width instead of the
+        // viewer's default "fit page" (which leaves a portrait page small).
+        var pdf = el('embed', 'preview-pdf');
+        pdf.src = MEDIA_URL + '?path=' + encodeURIComponent(path) + '#zoom=page-width';
+        pdf.type = 'application/pdf';
+        area.appendChild(pdf);
         if (diff) area.appendChild(diffNode(diff));
         return;
       }

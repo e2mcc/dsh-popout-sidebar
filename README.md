@@ -38,7 +38,7 @@ dsh plugin --profile web add github:e2mcc/dsh-popout-sidebar
 - ↗️ **弹出为独立标签页**：一键把侧边栏弹出为独立网页标签页（`/popout-sidebar`），每 1.5s 自动刷新，可拖到另一块显示器上更大、更清晰地观看。
 - 🗂 **产物侧边栏**：实时列出代理通过 `write` / `edit` 创建或修改的文件，以及 `bash` / `pwsh` 命令在工作区里产生的文件（如脚本生成的图片）；列表与预览区之间的分界线可拖动调整。
 - 🌳 **文件树**：侧边栏与独立标签页内都有「文件树」，可浏览当前工作区目录（懒加载展开，点击文件即预览），并**实时跟随工作区切换**。
-- 👀 **多类型预览**：按文件类型预览——代码 / 纯文本（语法高亮 + 行号）、Markdown 渲染、图片、HTML（沙箱 iframe），超长内容自动截断。
+- 👀 **多类型预览**：按文件类型预览——代码 / 纯文本（语法高亮 + 行号）、Markdown 渲染、图片、PDF（浏览器原生查看器）、HTML（沙箱 iframe），超长内容自动截断。
 - 📝 **编辑差异**：`edit` 修改过的文件在预览里展示「删除 / 新增」改动片段对比。
 - 🔗 **复制 / 引用**：一键复制文件路径，或把 `@path` 引用写入会话输入框（悬浮在列表行）。
 - 🧭 **与其他 sidebar 兼容**：其他「侧边卡片」打开时，本侧边栏自动让位到其左侧，两者同时可见。
@@ -52,7 +52,7 @@ dsh plugin --profile web add github:e2mcc/dsh-popout-sidebar
   - 监听 `tools/result` 事件，追踪 `write` / `edit` 的成功调用并提取 `file_path`（`edit` 额外记录 `old_string`/`new_string` 改动片段，并按扩展名标注预览类型）。
   - 监听 `tools/execute` 事件，对 `bash` / `pwsh` 这类「不透明」执行器做工作区前后快照对比（`fs.listDir` 递归 + 版本 token 指纹，跳过 `node_modules`/`.git` 等大目录），把命令间接新增/改写的文件并入产物列表。
   - 通过 `harness.handle` 暴露 RPC：`artifacts.list`、`artifacts.read`、`artifacts.remove`、`artifacts.listDir`。
-  - 通过 `webServer.register` 提供路由：`/popout-sidebar`（页面）、`/popout-sidebar/data`（JSON）、`/popout-sidebar/content`（文本预览）、`/popout-sidebar/media`（二进制图片）、`/popout-sidebar/remove`（移除条目）、`/popout-sidebar/listdir`（目录列表）。
+  - 通过 `webServer.register` 提供路由：`/popout-sidebar`（页面）、`/popout-sidebar/data`（JSON）、`/popout-sidebar/content`（文本预览）、`/popout-sidebar/media`（二进制图片 / PDF）、`/popout-sidebar/remove`（移除条目）、`/popout-sidebar/listdir`（目录列表）。
 - **Client（浏览器）**
   - 在 `shell.overlay`（root 作用域）注册一个固定于**右上角**的常驻「产物」图标按钮，无会话时依然可见。
   - 在 `shell.overlay` 渲染浮动侧边栏面板。

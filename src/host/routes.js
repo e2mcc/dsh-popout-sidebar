@@ -111,3 +111,22 @@
           res.end(JSON.stringify(out))
         },
       }), 'artifacts: listdir route')
+      // pdf.js assets for the sidebar's custom PDF renderer. Served from the
+      // embedded (vendored) copies so the plugin works fully offline. Long
+      // cache lifetime: the bytes are versioned with the plugin itself.
+      ctx.effect(() => webServer.register({
+        kind: 'exact',
+        path: '/popout-sidebar/pdfjs/pdf.min.js',
+        handler(req, res) {
+          res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=31536000' })
+          res.end(PDFJS_LIB)
+        },
+      }), 'artifacts: pdf.js lib route')
+      ctx.effect(() => webServer.register({
+        kind: 'exact',
+        path: '/popout-sidebar/pdfjs/pdf.worker.min.js',
+        handler(req, res) {
+          res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=31536000' })
+          res.end(PDFJS_WORKER)
+        },
+      }), 'artifacts: pdf.js worker route')

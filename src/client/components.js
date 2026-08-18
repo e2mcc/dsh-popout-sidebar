@@ -304,7 +304,8 @@
       const openFile = (path, diff) => {
         const type = extType(path)
         const base = { path, type, diff: diff || null }
-        if (type === 'image') {
+        // Images and PDFs are served as binary media — no text read needed.
+        if (type === 'image' || type === 'pdf') {
           setPreview(Object.assign({}, base, { loading: false }))
           return
         }
