@@ -153,6 +153,31 @@ header:has([data-slot="conversation.session.header.utilities"]) {
 .artifacts-splitter::after { content: ''; position: absolute; left: 0; right: 0; top: 2px; height: 2px; background: transparent; transition: background .15s; }
 .artifacts-splitter:hover::after, .artifacts-splitter.artifacts-splitting::after { background: var(--dsw-alias-interactive-bg-hover-accent); }
 .artifacts-splitter.artifacts-splitting { user-select: none; }
+/* Collapse button in the middle of the divider: shows on hover, and stays
+   visible while the preview is collapsed so it can be re-expanded. */
+.artifacts-collapse-btn {
+  position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+  width: 32px; height: 16px; border: 1px solid var(--dsw-alias-border-l2);
+  /* Expanded: square top (attached to the divider), rounded bottom. */
+  border-radius: 0 0 999px 999px; background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary); cursor: pointer; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0; line-height: 1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  opacity: 0; transition: opacity .15s, color .15s, background .15s, box-shadow .15s;
+}
+/* Expanded: hang below the divider (top edge flush with it). Collapsed: hang
+   above the divider (bottom edge flush with it) — never cross the line. */
+.artifacts-splitter.artifacts-collapsed .artifacts-collapse-btn {
+  top: auto; bottom: 0;
+  /* Collapsed: rounded top, square bottom (attached to the divider). */
+  border-radius: 999px 999px 0 0;
+}
+.artifacts-splitter:hover .artifacts-collapse-btn,
+.artifacts-splitter.artifacts-collapsed .artifacts-collapse-btn { opacity: 1; }
+.artifacts-collapse-btn:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12); }
+.artifacts-collapse-icon { display: inline-flex; transition: transform .18s var(--ds-ease-in-out, ease); }
+.artifacts-splitter.artifacts-collapsed .artifacts-collapse-icon { transform: rotate(180deg); }
 
 /* Tabs (产物 / 文件树). The bottom border is the divider between the tab row
    (including the「文件树」label) and the artifact/file list below it. */

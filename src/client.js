@@ -455,6 +455,7 @@ window.__ModuleLoader__.load({
       minPanelWidth: 20,       // minimum panel width as % of window width
       showFileTree: true,      // show the 文件树 (file tree) tab in the panel
       defaultOpen: true,       // expand the sidebar by default on load
+      previewHeight: 60,       // default preview area height as % of the panel
     }
 
     function loadSettings() {
@@ -652,6 +653,31 @@ header:has([data-slot="conversation.session.header.utilities"]) {
 .artifacts-splitter::after { content: ''; position: absolute; left: 0; right: 0; top: 2px; height: 2px; background: transparent; transition: background .15s; }
 .artifacts-splitter:hover::after, .artifacts-splitter.artifacts-splitting::after { background: var(--dsw-alias-interactive-bg-hover-accent); }
 .artifacts-splitter.artifacts-splitting { user-select: none; }
+/* Collapse button in the middle of the divider: shows on hover, and stays
+   visible while the preview is collapsed so it can be re-expanded. */
+.artifacts-collapse-btn {
+  position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+  width: 32px; height: 16px; border: 1px solid var(--dsw-alias-border-l2);
+  /* Expanded: square top (attached to the divider), rounded bottom. */
+  border-radius: 0 0 999px 999px; background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary); cursor: pointer; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0; line-height: 1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  opacity: 0; transition: opacity .15s, color .15s, background .15s, box-shadow .15s;
+}
+/* Expanded: hang below the divider (top edge flush with it). Collapsed: hang
+   above the divider (bottom edge flush with it) — never cross the line. */
+.artifacts-splitter.artifacts-collapsed .artifacts-collapse-btn {
+  top: auto; bottom: 0;
+  /* Collapsed: rounded top, square bottom (attached to the divider). */
+  border-radius: 999px 999px 0 0;
+}
+.artifacts-splitter:hover .artifacts-collapse-btn,
+.artifacts-splitter.artifacts-collapsed .artifacts-collapse-btn { opacity: 1; }
+.artifacts-collapse-btn:hover { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12); }
+.artifacts-collapse-icon { display: inline-flex; transition: transform .18s var(--ds-ease-in-out, ease); }
+.artifacts-splitter.artifacts-collapsed .artifacts-collapse-icon { transform: rotate(180deg); }
 
 /* Tabs (产物 / 文件树). The bottom border is the divider between the tab row
    (including the「文件树」label) and the artifact/file list below it. */
@@ -780,6 +806,15 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
     const RefreshIcon = (size) => React.createElement('svg', {
       width: size, height: size, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true,
     }, React.createElement('path', { d: 'M7.92136 0.349152C10.3744 0.349234 12.5564 1.5052 13.9557 3.29894L15.1281 2.12759C15.3303 1.92546 15.6767 2.06943 15.6767 2.35538V5.53923C15.6766 5.71626 15.5329 5.85976 15.3559 5.86002H12.171C11.8854 5.8597 11.7426 5.51465 11.9443 5.31249L12.9641 4.29056C11.8237 2.74305 9.98908 1.74106 7.92136 1.74097C4.46436 1.74097 1.66233 4.543 1.66233 8C1.66233 11.457 4.46436 14.259 7.92136 14.259C11.3782 14.2589 14.1804 11.4569 14.1804 8H15.5722C15.5722 12.2251 12.1465 15.6507 7.92136 15.6508C3.69614 15.6508 0.270508 12.2252 0.270508 8C0.270508 3.77478 3.69614 0.349152 7.92136 0.349152Z', fill: 'currentColor' }))
+
+    // Chevron (down) for the divider's collapse button. Rendered as a rounded
+    // stroke; the collapsed state rotates it 180° (pointing up) via CSS.
+    const ChevronIcon = (size) => React.createElement('svg', {
+      width: size, height: size, viewBox: '0 0 10 10', fill: 'none', 'aria-hidden': true,
+    }, React.createElement('path', {
+      d: 'M1.6 3.6 L5 7 L8.4 3.6',
+      stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none',
+    }))
 
     // File tree (文件树): lazy-loaded recursive directory browser styled like
     // better-sidebar's explorer — rounded rows, folder/file icons, a hover
@@ -1190,8 +1225,12 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       const [deleteTarget, setDeleteTarget] = React.useState(null)
       const [panelWidth, setPanelWidth] = React.useState(null) // null = use min
       const [resizing, setResizing] = React.useState(false)
-      const [split, setSplit] = React.useState(0.45) // list/preview split ratio
+      // The divider's initial position comes from the "预览区高度" setting
+      // (split = the list's max-height ratio; preview takes the rest). The
+      // user can still drag the splitter to override at runtime.
+      const [split, setSplit] = React.useState(() => (100 - (settings.previewHeight ?? 60)) / 100)
       const [splitting, setSplitting] = React.useState(false)
+      const [collapsed, setCollapsed] = React.useState(false) // preview collapsed to the bottom
       const [activeView, setActiveView] = React.useState('artifacts') // 'artifacts' | 'tree'
       const bodyRef = React.useRef(null)
       const previewRef = React.useRef(null)
@@ -1284,6 +1323,9 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
 
       const startSplit = (e) => {
         e.preventDefault()
+        // Dragging the splitter while collapsed just re-expands the preview;
+        // the drag-to-resize gesture applies once it is visible again.
+        if (collapsed) { setCollapsed(false); return }
         setSplitting(true)
         const bodyEl = bodyRef.current
         const previewEl = previewRef.current
@@ -1333,6 +1375,8 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       }
 
       const openFile = (path, diff) => {
+        // Opening any previewable file re-expands a collapsed preview.
+        setCollapsed(false)
         const type = extType(path)
         const base = { path, type, diff: diff || null }
         // Images and PDFs are served as binary media — no text read needed.
@@ -1440,7 +1484,10 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
         React.createElement('div', {
           className: 'artifacts-body',
           ref: bodyRef,
-          style: { flex: '0 0 ' + (split * 100) + '%' },
+          // Auto-size to content (up to the split cap) so a short file tree /
+          // artifact list doesn't leave a big empty gap above the splitter.
+          // When collapsed the list fills the whole panel (preview hidden).
+          style: collapsed ? { flex: '1 1 auto' } : { flex: '0 1 auto', maxHeight: (split * 100) + '%' },
         },
           (activeView === 'tree' && settings.showFileTree)
             ? React.createElement(FileTree, { onOpen: openFile, selectedPath: preview ? preview.path : null })
@@ -1450,14 +1497,23 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
               ],
         ),
         React.createElement('div', {
-          className: 'artifacts-splitter' + (splitting ? ' artifacts-splitting' : ''),
+          className: 'artifacts-splitter' + (splitting ? ' artifacts-splitting' : '') + (collapsed ? ' artifacts-collapsed' : ''),
           title: '拖动调整产物列表与预览的分界',
           onMouseDown: startSplit,
-        }),
+        },
+          React.createElement('button', {
+            type: 'button',
+            className: 'artifacts-collapse-btn',
+            title: collapsed ? '展开预览区' : '收起预览区',
+            'aria-expanded': !collapsed,
+            onMouseDown: (e) => e.stopPropagation(),
+            onClick: () => setCollapsed(!collapsed),
+          }, React.createElement('span', { className: 'artifacts-collapse-icon' }, ChevronIcon(10))),
+        ),
         React.createElement('div', {
           className: 'artifacts-preview',
           ref: previewRef,
-          style: { flex: '1 1 0%' },
+          style: collapsed ? { flex: '0 0 0%', display: 'none' } : { flex: '1 1 0%' },
         },
           preview ? renderPreview(preview) : React.createElement('div', { className: 'artifacts-hint' }, '点击文件预览内容'),
         ),
@@ -1540,6 +1596,27 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
                   const n = parseInt(e.currentTarget.value, 10)
                   if (Number.isNaN(n)) return
                   set('minPanelWidth', Math.max(20, Math.min(60, n)))
+                },
+              }),
+              React.createElement('span', { className: 'artifacts-suffix' }, '%'),
+            ),
+          ),
+          React.createElement('div', { className: 'artifacts-setrow' },
+            React.createElement('div', { className: 'artifacts-settext' },
+              React.createElement('div', { className: 'artifacts-settitle' }, '预览区默认高度'),
+              React.createElement('div', { className: 'artifacts-setdesc' }, '预览区占面板高度的百分比（20–80），决定预览区与文件树/产物展示区分界线的位置；仍可拖动分界线临时调整。'),
+            ),
+            React.createElement('div', { className: 'artifacts-setcontrol' },
+              React.createElement('input', {
+                type: 'number',
+                className: 'artifacts-widthinput',
+                min: 20,
+                max: 80,
+                value: settings.previewHeight,
+                onChange: (e) => {
+                  const n = parseInt(e.currentTarget.value, 10)
+                  if (Number.isNaN(n)) return
+                  set('previewHeight', Math.max(20, Math.min(80, n)))
                 },
               }),
               React.createElement('span', { className: 'artifacts-suffix' }, '%'),

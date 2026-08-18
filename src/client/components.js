@@ -159,8 +159,12 @@
       const [deleteTarget, setDeleteTarget] = React.useState(null)
       const [panelWidth, setPanelWidth] = React.useState(null) // null = use min
       const [resizing, setResizing] = React.useState(false)
-      const [split, setSplit] = React.useState(0.45) // list/preview split ratio
+      // The divider's initial position comes from the "预览区高度" setting
+      // (split = the list's max-height ratio; preview takes the rest). The
+      // user can still drag the splitter to override at runtime.
+      const [split, setSplit] = React.useState(() => (100 - (settings.previewHeight ?? 60)) / 100)
       const [splitting, setSplitting] = React.useState(false)
+      const [collapsed, setCollapsed] = React.useState(false) // preview collapsed to the bottom
       const [activeView, setActiveView] = React.useState('artifacts') // 'artifacts' | 'tree'
       const bodyRef = React.useRef(null)
       const previewRef = React.useRef(null)
@@ -253,6 +257,9 @@
 
       const startSplit = (e) => {
         e.preventDefault()
+        // Dragging the splitter while collapsed just re-expands the preview;
+        // the drag-to-resize gesture applies once it is visible again.
+        if (collapsed) { setCollapsed(false); return }
         setSplitting(true)
         const bodyEl = bodyRef.current
         const previewEl = previewRef.current
@@ -302,6 +309,8 @@
       }
 
       const openFile = (path, diff) => {
+        // Opening any previewable file re-expands a collapsed preview.
+        setCollapsed(false)
         const type = extType(path)
         const base = { path, type, diff: diff || null }
         // Images and PDFs are served as binary media — no text read needed.
@@ -409,7 +418,10 @@
         React.createElement('div', {
           className: 'artifacts-body',
           ref: bodyRef,
-          style: { flex: '0 0 ' + (split * 100) + '%' },
+          // Auto-size to content (up to the split cap) so a short file tree /
+          // artifact list doesn't leave a big empty gap above the splitter.
+          // When collapsed the list fills the whole panel (preview hidden).
+          style: collapsed ? { flex: '1 1 auto' } : { flex: '0 1 auto', maxHeight: (split * 100) + '%' },
         },
           (activeView === 'tree' && settings.showFileTree)
             ? React.createElement(FileTree, { onOpen: openFile, selectedPath: preview ? preview.path : null })
@@ -419,14 +431,23 @@
               ],
         ),
         React.createElement('div', {
-          className: 'artifacts-splitter' + (splitting ? ' artifacts-splitting' : ''),
+          className: 'artifacts-splitter' + (splitting ? ' artifacts-splitting' : '') + (collapsed ? ' artifacts-collapsed' : ''),
           title: '拖动调整产物列表与预览的分界',
           onMouseDown: startSplit,
-        }),
+        },
+          React.createElement('button', {
+            type: 'button',
+            className: 'artifacts-collapse-btn',
+            title: collapsed ? '展开预览区' : '收起预览区',
+            'aria-expanded': !collapsed,
+            onMouseDown: (e) => e.stopPropagation(),
+            onClick: () => setCollapsed(!collapsed),
+          }, React.createElement('span', { className: 'artifacts-collapse-icon' }, ChevronIcon(10))),
+        ),
         React.createElement('div', {
           className: 'artifacts-preview',
           ref: previewRef,
-          style: { flex: '1 1 0%' },
+          style: collapsed ? { flex: '0 0 0%', display: 'none' } : { flex: '1 1 0%' },
         },
           preview ? renderPreview(preview) : React.createElement('div', { className: 'artifacts-hint' }, '点击文件预览内容'),
         ),
@@ -509,6 +530,27 @@
                   const n = parseInt(e.currentTarget.value, 10)
                   if (Number.isNaN(n)) return
                   set('minPanelWidth', Math.max(20, Math.min(60, n)))
+                },
+              }),
+              React.createElement('span', { className: 'artifacts-suffix' }, '%'),
+            ),
+          ),
+          React.createElement('div', { className: 'artifacts-setrow' },
+            React.createElement('div', { className: 'artifacts-settext' },
+              React.createElement('div', { className: 'artifacts-settitle' }, '预览区默认高度'),
+              React.createElement('div', { className: 'artifacts-setdesc' }, '预览区占面板高度的百分比（20–80），决定预览区与文件树/产物展示区分界线的位置；仍可拖动分界线临时调整。'),
+            ),
+            React.createElement('div', { className: 'artifacts-setcontrol' },
+              React.createElement('input', {
+                type: 'number',
+                className: 'artifacts-widthinput',
+                min: 20,
+                max: 80,
+                value: settings.previewHeight,
+                onChange: (e) => {
+                  const n = parseInt(e.currentTarget.value, 10)
+                  if (Number.isNaN(n)) return
+                  set('previewHeight', Math.max(20, Math.min(80, n)))
                 },
               }),
               React.createElement('span', { className: 'artifacts-suffix' }, '%'),
