@@ -455,7 +455,7 @@ window.__ModuleLoader__.load({
       minPanelWidth: 20,       // minimum panel width as % of window width
       showFileTree: true,      // show the 文件树 (file tree) tab in the panel
       defaultOpen: true,       // expand the sidebar by default on load
-      previewHeight: 60,       // default preview area height as % of the panel
+      previewHeight: 70,       // default preview area height as % of the panel
     }
 
     function loadSettings() {
@@ -1228,7 +1228,7 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       // The divider's initial position comes from the "预览区高度" setting
       // (split = the list's max-height ratio; preview takes the rest). The
       // user can still drag the splitter to override at runtime.
-      const [split, setSplit] = React.useState(() => (100 - (settings.previewHeight ?? 60)) / 100)
+      const [split, setSplit] = React.useState(() => (100 - (settings.previewHeight ?? 70)) / 100)
       const [splitting, setSplitting] = React.useState(false)
       const [collapsed, setCollapsed] = React.useState(false) // preview collapsed to the bottom
       const [activeView, setActiveView] = React.useState('artifacts') // 'artifacts' | 'tree'
@@ -1321,11 +1321,19 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
         document.addEventListener('mouseup', onUp)
       }
 
+      // Expand the preview and reset the divider to the configured default
+      // height ("预览区默认高度") — applied on every re-expansion, regardless
+      // of any runtime drag override.
+      const expandPreview = () => {
+        setCollapsed(false)
+        setSplit((100 - (settings.previewHeight ?? 70)) / 100)
+      }
+
       const startSplit = (e) => {
         e.preventDefault()
-        // Dragging the splitter while collapsed just re-expands the preview;
-        // the drag-to-resize gesture applies once it is visible again.
-        if (collapsed) { setCollapsed(false); return }
+        // Dragging the splitter while collapsed just re-expands the preview
+        // (at the default height); drag-to-resize applies once visible again.
+        if (collapsed) { expandPreview(); return }
         setSplitting(true)
         const bodyEl = bodyRef.current
         const previewEl = previewRef.current
@@ -1375,8 +1383,9 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       }
 
       const openFile = (path, diff) => {
-        // Opening any previewable file re-expands a collapsed preview.
-        setCollapsed(false)
+        // Opening any previewable file re-expands a collapsed preview (at the
+        // default height).
+        if (collapsed) expandPreview()
         const type = extType(path)
         const base = { path, type, diff: diff || null }
         // Images and PDFs are served as binary media — no text read needed.
@@ -1507,7 +1516,7 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
             title: collapsed ? '展开预览区' : '收起预览区',
             'aria-expanded': !collapsed,
             onMouseDown: (e) => e.stopPropagation(),
-            onClick: () => setCollapsed(!collapsed),
+            onClick: () => { if (collapsed) expandPreview(); else setCollapsed(true) },
           }, React.createElement('span', { className: 'artifacts-collapse-icon' }, ChevronIcon(10))),
         ),
         React.createElement('div', {

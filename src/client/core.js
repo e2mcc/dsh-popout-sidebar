@@ -89,7 +89,7 @@
       minPanelWidth: 20,       // minimum panel width as % of window width
       showFileTree: true,      // show the 文件树 (file tree) tab in the panel
       defaultOpen: true,       // expand the sidebar by default on load
-      previewHeight: 60,       // default preview area height as % of the panel
+      previewHeight: 70,       // default preview area height as % of the panel
     }
 
     function loadSettings() {
