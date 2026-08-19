@@ -13,6 +13,10 @@
     "plugin"
   ],
   "main": "src/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e2mcc/dsh-popout-sidebar.git"
+  },
   "scripts": {
     "build": "node scripts/build.js"
   },
