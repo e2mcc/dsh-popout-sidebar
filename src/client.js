@@ -555,7 +555,8 @@ header:has([data-slot="conversation.session.header.utilities"]) {
   cursor: pointer; font-size: 12px;
 }
 .artifacts-iconbtn:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.artifacts-body { flex: 1 1 45%; min-height: 0; overflow-y: auto; }
+.artifacts-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.artifacts-body { flex: 0 0 auto; min-height: 0; overflow-y: auto; }
 .artifacts-empty { padding: 28px 16px; color: var(--dsw-alias-label-tertiary); text-align: center; }
 .artifacts-item {
   display: block; width: 100%; text-align: left; padding: 9px 12px;
@@ -573,7 +574,7 @@ header:has([data-slot="conversation.session.header.utilities"]) {
   color: var(--dsw-alias-label-tertiary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   margin-top: 2px; font-family: var(--dsh-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
-.artifacts-preview { flex: 1 1 55%; min-height: 0; display: flex; flex-direction: column; }
+.artifacts-preview { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .artifacts-pre {
   flex: 1; margin: 0; overflow: auto; padding: 12px;
   font-family: var(--dsh-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -1226,15 +1227,21 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       const [panelWidth, setPanelWidth] = React.useState(null) // null = use min
       const [resizing, setResizing] = React.useState(false)
       // The divider's initial position comes from the "预览区高度" setting
-      // (split = the list's max-height ratio; preview takes the rest). The
-      // user can still drag the splitter to override at runtime.
+      // (split = the list/tree area's height ratio; preview takes the rest).
+      // The user can still drag the splitter to override at runtime; that
+      // override is discarded whenever the preview is re-expanded, returning
+      // the divider to the configured default height.
       const [split, setSplit] = React.useState(() => (100 - (settings.previewHeight ?? 70)) / 100)
       const [splitting, setSplitting] = React.useState(false)
       const [collapsed, setCollapsed] = React.useState(false) // preview collapsed to the bottom
       const [activeView, setActiveView] = React.useState('artifacts') // 'artifacts' | 'tree'
-      const bodyRef = React.useRef(null)
-      const previewRef = React.useRef(null)
+      const mainRef = React.useRef(null)
       const noticeTimer = React.useRef(null)
+
+      // The list/tree area can be dragged between 10% and 90% of the split
+      // area so the divider moves freely (never pinned to content or default).
+      const MIN_SPLIT = 0.1
+      const MAX_SPLIT = 0.9
 
       React.useEffect(() => {
         if (!open) return
@@ -1335,14 +1342,14 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
         // (at the default height); drag-to-resize applies once visible again.
         if (collapsed) { expandPreview(); return }
         setSplitting(true)
-        const bodyEl = bodyRef.current
-        const previewEl = previewRef.current
-        if (!bodyEl || !previewEl) return
-        const top = bodyEl.getBoundingClientRect().top
-        const bottom = previewEl.getBoundingClientRect().bottom
+        const mainEl = mainRef.current
+        if (!mainEl) return
+        const top = mainEl.getBoundingClientRect().top
+        const height = mainEl.getBoundingClientRect().height
+        if (height <= 0) return
         const onMove = (ev) => {
-          const ratio = (ev.clientY - top) / (bottom - top)
-          setSplit(Math.max(0.15, Math.min(0.85, ratio)))
+          const ratio = (ev.clientY - top) / height
+          setSplit(Math.max(MIN_SPLIT, Math.min(MAX_SPLIT, ratio)))
         }
         const onUp = () => {
           setSplitting(false)
@@ -1491,40 +1498,44 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
           }, '文件树'),
         ) : null,
         React.createElement('div', {
-          className: 'artifacts-body',
-          ref: bodyRef,
-          // Auto-size to content (up to the split cap) so a short file tree /
-          // artifact list doesn't leave a big empty gap above the splitter.
-          // When collapsed the list fills the whole panel (preview hidden).
-          style: collapsed ? { flex: '1 1 auto' } : { flex: '0 1 auto', maxHeight: (split * 100) + '%' },
+          className: 'artifacts-main',
+          ref: mainRef,
         },
-          (activeView === 'tree' && settings.showFileTree)
-            ? React.createElement(FileTree, { onOpen: openFile, selectedPath: preview ? preview.path : null })
-            : [
-                deleteMode ? React.createElement('div', { className: 'artifacts-delete-hint' }, '清除模式：点击产物标记，再点红色 × 清除（仅清除内存记录，不删除磁盘文件）') : null,
-                listChildren,
-              ],
-        ),
-        React.createElement('div', {
-          className: 'artifacts-splitter' + (splitting ? ' artifacts-splitting' : '') + (collapsed ? ' artifacts-collapsed' : ''),
-          title: '拖动调整产物列表与预览的分界',
-          onMouseDown: startSplit,
-        },
-          React.createElement('button', {
-            type: 'button',
-            className: 'artifacts-collapse-btn',
-            title: collapsed ? '展开预览区' : '收起预览区',
-            'aria-expanded': !collapsed,
-            onMouseDown: (e) => e.stopPropagation(),
-            onClick: () => { if (collapsed) expandPreview(); else setCollapsed(true) },
-          }, React.createElement('span', { className: 'artifacts-collapse-icon' }, ChevronIcon(10))),
-        ),
-        React.createElement('div', {
-          className: 'artifacts-preview',
-          ref: previewRef,
-          style: collapsed ? { flex: '0 0 0%', display: 'none' } : { flex: '1 1 0%' },
-        },
-          preview ? renderPreview(preview) : React.createElement('div', { className: 'artifacts-hint' }, '点击文件预览内容'),
+          React.createElement('div', {
+            className: 'artifacts-body',
+            // The body takes exactly `split` of the split area, so the divider
+            // freely divides list/tree from preview in BOTH tabs (its position
+            // follows the pointer, never the content height). When collapsed
+            // the list fills the whole area (preview hidden).
+            style: collapsed ? { flex: '1 1 auto' } : { flex: '0 0 auto', height: (split * 100) + '%' },
+          },
+            (activeView === 'tree' && settings.showFileTree)
+              ? React.createElement(FileTree, { onOpen: openFile, selectedPath: preview ? preview.path : null })
+              : [
+                  deleteMode ? React.createElement('div', { className: 'artifacts-delete-hint' }, '清除模式：点击产物标记，再点红色 × 清除（仅清除内存记录，不删除磁盘文件）') : null,
+                  listChildren,
+                ],
+          ),
+          React.createElement('div', {
+            className: 'artifacts-splitter' + (splitting ? ' artifacts-splitting' : '') + (collapsed ? ' artifacts-collapsed' : ''),
+            title: '拖动调整产物列表与预览的分界',
+            onMouseDown: startSplit,
+          },
+            React.createElement('button', {
+              type: 'button',
+              className: 'artifacts-collapse-btn',
+              title: collapsed ? '展开预览区' : '收起预览区',
+              'aria-expanded': !collapsed,
+              onMouseDown: (e) => e.stopPropagation(),
+              onClick: () => { if (collapsed) expandPreview(); else setCollapsed(true) },
+            }, React.createElement('span', { className: 'artifacts-collapse-icon' }, ChevronIcon(10))),
+          ),
+          React.createElement('div', {
+            className: 'artifacts-preview',
+            style: collapsed ? { flex: '0 0 0%', display: 'none' } : { flex: '1 1 auto', minHeight: 0 },
+          },
+            preview ? renderPreview(preview) : React.createElement('div', { className: 'artifacts-hint' }, '点击文件预览内容'),
+          ),
         ),
       )
     }
