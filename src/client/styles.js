@@ -1,7 +1,10 @@
 /* Layout push: reserve space for the popout panel so the conversation column
-   yields instead of being covered (same technique as better-sidebar's right
-   panel). --dsh-popout-sidebar-width is set live by the panel component;
-   --dsh-sidebar-width is better-sidebar's right panel. */
+   yields instead of being covered (same technique as the built-in right
+   sidebar's track). --dsh-popout-sidebar-width is set live by the panel
+   component; --dsh-sidebar-width is better-sidebar's right panel;
+   --dsh-rightbar-occlusion is the built-in right sidebar's occupied width,
+   measured live by the corner trigger (DSH ≥0.1.7 scopes its own
+   --dsh-sidebar-width to its panel subtree, invisible from here). */
 html #root {
   margin-right: calc(var(--dsh-sidebar-width, 0px) + var(--dsh-popout-sidebar-width, 0px));
   transition: margin-right var(--ds-transition-duration-slow, 200ms) var(--ds-ease-in-out, ease);
@@ -15,6 +18,13 @@ body[data-dsh-popout-dragging] #root {
 header:has([data-slot="conversation.session.header.utilities"]) {
   padding-right: max(28px, calc(60px - var(--dsh-popout-sidebar-width, 0px)));
   transition: padding-right var(--ds-transition-duration-slow, 200ms) var(--ds-ease-in-out, ease);
+}
+/* While the built-in right sidebar is collapsed, DSH parks its expand control
+   in the header's corner seat — which reaches 16px into the header's padding,
+   landing exactly under the corner trigger. Widen the reservation so both
+   controls sit side by side (trigger 12–48px, expand ~56–84px from the edge). */
+header:has([data-sidebar-right-expand]) {
+  padding-right: max(28px, calc(100px - var(--dsh-popout-sidebar-width, 0px)));
 }
 @media (prefers-reduced-motion: reduce) {
   html #root { transition: none; }
@@ -84,7 +94,7 @@ header:has([data-slot="conversation.session.header.utilities"]) {
 .artifacts-hint { padding: 24px 16px; color: var(--dsw-alias-label-tertiary); text-align: center; }
 .artifacts-error { padding: 16px; color: var(--dsw-alias-state-error-primary); font-family: var(--dsh-font-mono, monospace); word-break: break-all; }
 .artifacts-corner-btn {
-  position: fixed; top: 10px; right: calc(var(--dsh-sidebar-width, 0px) + var(--dsh-popout-sidebar-width, 0px) + 12px);
+  position: fixed; top: 10px; right: calc(var(--dsh-rightbar-occlusion, 0px) + var(--dsh-sidebar-width, 0px) + var(--dsh-popout-sidebar-width, 0px) + 12px);
   z-index: 10000; width: 36px; height: 36px; padding: 0;
   border: none; background: transparent; color: var(--dsw-alias-label-secondary);
   cursor: pointer; align-items: center; justify-content: center; display: inline-flex;

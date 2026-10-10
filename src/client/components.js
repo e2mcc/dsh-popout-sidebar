@@ -473,6 +473,58 @@
       )
     }
 
+    // DSH ≥0.1.7 ships a built-in right sidebar whose controls share the
+    // screen's top-right corner with this panel's trigger: its tab-strip
+    // buttons while expanded (push mode), and a header expand control while
+    // collapsed (cleared by the styles' header reservation). Its width lives
+    // in a --dsh-sidebar-width set on its own panel subtree — invisible to
+    // this plugin's overlay — so measure the panel here and publish the
+    // occupied width as --dsh-rightbar-occlusion on <html> for the trigger's
+    // `right` calc. Fullscreen mode covers the trigger's stacking layer
+    // entirely, so it counts as no occlusion.
+    const RIGHTBAR_OCC_VAR = '--dsh-rightbar-occlusion'
+    let rightbarOccFrame = 0
+    const measureRightbar = () => {
+      rightbarOccFrame = 0
+      let occ = 0
+      for (const panel of document.querySelectorAll('[data-sidebar-right-panel]')) {
+        if (panel.getAttribute('data-sidebar-right-panel') !== 'push') continue
+        if (!panel.hasAttribute('data-sidebar-right-open')) continue
+        if (panel.offsetParent === null) continue // a retained but hidden session view
+        const rect = panel.getBoundingClientRect()
+        if (rect.width > 0) { occ = Math.round(rect.width); break }
+      }
+      const next = occ + 'px'
+      if (document.documentElement.style.getPropertyValue(RIGHTBAR_OCC_VAR) !== next) {
+        document.documentElement.style.setProperty(RIGHTBAR_OCC_VAR, next)
+      }
+    }
+    const scheduleRightbarMeasure = () => {
+      if (rightbarOccFrame) return
+      rightbarOccFrame = requestAnimationFrame(measureRightbar)
+    }
+    // One tracker per page even if the plugin body is applied twice.
+    if (!window.__dshPopoutSidebarRightbarTracker) {
+      window.__dshPopoutSidebarRightbarTracker = true
+      try {
+        const seen = new WeakSet()
+        const ro = new ResizeObserver(scheduleRightbarMeasure)
+        const watch = () => {
+          for (const panel of document.querySelectorAll('[data-sidebar-right-panel]')) {
+            if (!seen.has(panel)) { seen.add(panel); ro.observe(panel) }
+          }
+        }
+        // childList catches the panel mounting/unmounting (per-session seats);
+        // attributes catch open/close and push/fullscreen flips; the resize
+        // observer catches width drags of the built-in panel.
+        new MutationObserver(() => { scheduleRightbarMeasure(); watch() })
+          .observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-sidebar-right-open', 'data-sidebar-right-panel'] })
+        watch()
+      } catch (e) {}
+      window.addEventListener('resize', scheduleRightbarMeasure, { passive: true })
+      measureRightbar()
+    }
+
     // Persistent trigger pinned to the top-right corner. Registered into the
     // root-scoped `shell.overlay` list so it stays visible with no conversation;
     // the fixed CSS position keeps it at the corner, offset left by the right
