@@ -1,9 +1,9 @@
       const page = String.raw`<!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>弹出式侧边栏</title>
+<title>Popout Sidebar</title>
 <script>
   (function () {
     var m = /[?&]scheme=([^&]+)/.exec(location.search);
@@ -169,28 +169,28 @@
 </head>
 <body>
   <header>
-    <h1>弹出式侧边栏</h1>
+    <h1 id="appTitle"></h1>
     <span class="spacer"></span>
     <span class="status" id="status">connecting…</span>
   </header>
   <main>
     <div class="sidebar">
       <div class="tabs" id="tabs">
-        <button class="tab is-active" data-view="artifacts">产物</button>
-        <button class="tab" data-view="tree">文件树</button>
+        <button class="tab is-active" data-view="artifacts" id="tabArtifacts"></button>
+        <button class="tab" data-view="tree" id="tabTree"></button>
       </div>
       <div class="list" id="list"></div>
       <div class="tree" id="tree">
         <div class="tree-head">
           <span class="tree-root" id="treeRoot">…</span>
-          <button class="tree-refresh" id="treeRefresh" title="刷新" type="button"></button>
+          <button class="tree-refresh" id="treeRefresh" type="button"></button>
         </div>
         <div class="tree-body" id="treeBody"></div>
       </div>
     </div>
     <div class="preview">
-      <div class="bar" id="bar"><span class="path">Select a file to preview</span></div>
-      <div class="area" id="previewArea"><div class="hint">← 点击左侧文件预览内容</div></div>
+      <div class="bar" id="bar"><span class="path" id="barPath"></span></div>
+      <div class="area" id="previewArea"><div class="hint" id="previewHint"></div></div>
     </div>
   </main>
   <div class="toast" id="toast"></div>
@@ -224,6 +224,71 @@
     var treeChildren = {};
     var treeExpanded = {};
     var currentView = 'artifacts';
+
+    // The host renders this page, so it carries its own zh/en dictionaries.
+    // The sidebar passes its active language as ?lang=; a directly opened tab
+    // falls back to the browser language (Chinese for zh-*, English otherwise).
+    var LANG = (function () {
+      var m = /[?&]lang=([^&]+)/.exec(location.search);
+      var v = m ? decodeURIComponent(m[1]) : '';
+      if (v !== 'zh' && v !== 'en') {
+        v = (navigator.language || 'en').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en';
+      }
+      return v;
+    })();
+    var STR = {
+      zh: {
+        title: '弹出式侧边栏',
+        artifacts: '产物',
+        fileTree: '文件树',
+        refresh: '刷新',
+        previewHint: '← 点击左侧文件预览内容',
+        selectFile: '选择文件以预览',
+        diffRemoved: '- 删除',
+        diffAdded: '+ 新增',
+        createBadge: '新建',
+        editBadge: '编辑',
+        copyPath: '复制路径',
+        copiedPath: '已复制路径',
+        copyRefTip: '复制 @path 引用',
+        copiedRef: '已复制 @引用',
+        imageLoadFailed: '图片加载失败',
+        loadingFileTree: '加载文件树…',
+        loading: '加载中…',
+        emptyDir: '（空目录）',
+        loadFailed: '读取失败',
+        treeLoadFailed: '加载失败',
+        emptyArtifacts: '暂无产物 — 代理创建/编辑的文件会出现在这里。',
+        quoteBadge: '@引用'
+      },
+      en: {
+        title: 'Popout Sidebar',
+        artifacts: 'Artifacts',
+        fileTree: 'File tree',
+        refresh: 'Refresh',
+        previewHint: '← Click a file on the left to preview it',
+        selectFile: 'Select a file to preview',
+        diffRemoved: '- Removed',
+        diffAdded: '+ Added',
+        createBadge: 'New',
+        editBadge: 'Edit',
+        copyPath: 'Copy path',
+        copiedPath: 'Copied path',
+        copyRefTip: 'Copy @path reference',
+        copiedRef: 'Copied @reference',
+        imageLoadFailed: 'Failed to load image',
+        loadingFileTree: 'Loading file tree…',
+        loading: 'Loading…',
+        emptyDir: '(empty directory)',
+        loadFailed: 'Failed to load',
+        treeLoadFailed: 'Failed to load',
+        emptyArtifacts: 'No artifacts yet. Files created or edited by the agent will appear here.',
+        quoteBadge: '@quote'
+      }
+    }[LANG] || {};
+    function t(key) { return STR[key] != null ? STR[key] : key; }
+    document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+
 
 @@ext@@
 
@@ -301,12 +366,12 @@
       var wrap = el('div', 'diff');
       if (d && d.before != null && d.before !== '') {
         var del = el('div', 'diff-block del');
-        del.appendChild(el('div', 'diff-label', '- 删除'));
+        del.appendChild(el('div', 'diff-label', t('diffRemoved')));
         del.appendChild(el('pre', 'diff-pre', d.before));
         wrap.appendChild(del);
       }
       var add = el('div', 'diff-block add');
-      add.appendChild(el('div', 'diff-label', '+ 新增'));
+      add.appendChild(el('div', 'diff-label', t('diffAdded')));
       add.appendChild(el('pre', 'diff-pre', d && d.after != null ? d.after : ''));
       wrap.appendChild(add);
       return wrap;
@@ -318,7 +383,7 @@
       var list = document.getElementById('list');
       list.textContent = '';
       if (!items.length) {
-        list.appendChild(el('div', 'empty', 'No artifacts yet — files created/edited by the agent will appear here.'));
+        list.appendChild(el('div', 'empty', t('emptyArtifacts')));
         return;
       }
       items.forEach(function (it) {
@@ -326,7 +391,7 @@
         if (it.path === selectedPath) item.className += ' active';
         var main = el('button', 'item-main');
         var row = el('div', 'row');
-        var badge = el('span', 'badge ' + (it.kind === 'create' ? 'create' : 'edit'), it.kind === 'create' ? '新建' : '编辑');
+        var badge = el('span', 'badge ' + (it.kind === 'create' ? 'create' : 'edit'), it.kind === 'create' ? t('createBadge') : t('editBadge'));
         var base = el('span', 'base', basename(it.path));
         var time = el('span', 'time', timeAgo(it.at));
         row.appendChild(badge);
@@ -339,11 +404,11 @@
         item.appendChild(main);
         var actions = el('div', 'actions');
         var cp = el('button', 'mini-btn', '⧉');
-        cp.title = '复制路径';
-        cp.addEventListener('click', function (ev) { ev.stopPropagation(); copyText(it.path, '已复制路径'); });
+        cp.title = t('copyPath');
+        cp.addEventListener('click', function (ev) { ev.stopPropagation(); copyText(it.path, t('copiedPath')); });
         var qt = el('button', 'mini-btn', '@');
-        qt.title = '复制 @path 引用';
-        qt.addEventListener('click', function (ev) { ev.stopPropagation(); copyText('@' + it.path, '已复制 @引用'); });
+        qt.title = t('copyRefTip');
+        qt.addEventListener('click', function (ev) { ev.stopPropagation(); copyText('@' + it.path, t('copiedRef')); });
         actions.appendChild(cp);
         actions.appendChild(qt);
         item.appendChild(actions);
@@ -361,12 +426,12 @@
       bar.textContent = '';
       bar.appendChild(el('span', 'path', path));
       var cp = el('button', 'mini-btn', '⧉');
-      cp.title = '复制路径';
-      cp.addEventListener('click', function () { copyText(path, '已复制路径'); });
+      cp.title = t('copyPath');
+      cp.addEventListener('click', function () { copyText(path, t('copiedPath')); });
       bar.appendChild(cp);
       var qt = el('button', 'mini-btn', '@');
-      qt.title = '复制 @path 引用';
-      qt.addEventListener('click', function () { copyText('@' + path, '已复制 @引用'); });
+      qt.title = t('copyRefTip');
+      qt.addEventListener('click', function () { copyText('@' + path, t('copiedRef')); });
       bar.appendChild(qt);
 
       var type = extType(path);
@@ -374,7 +439,7 @@
         var img = el('img', 'preview-img');
         img.src = MEDIA_URL + '?path=' + encodeURIComponent(path);
         img.alt = path;
-        img.addEventListener('error', function () { area.textContent = ''; area.appendChild(errNode('图片加载失败')); });
+        img.addEventListener('error', function () { area.textContent = ''; area.appendChild(errNode(t('imageLoadFailed'))); });
         area.appendChild(img);
         if (diff) area.appendChild(diffNode(diff));
         return;
@@ -453,7 +518,7 @@
       if (rootLabel) rootLabel.textContent = '…';
       var bodyEl = document.getElementById('treeBody');
       bodyEl.textContent = '';
-      bodyEl.appendChild(el('div', 'tree-loading', '加载文件树…'));
+      bodyEl.appendChild(el('div', 'tree-loading', t('loadingFileTree')));
       fetch(listdirUrl(), { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (res) {
         if (res && res.ok) {
           treeRoot = { path: res.path, entries: res.entries };
@@ -465,7 +530,7 @@
       }).catch(function () {
         treeRoot = { path: null, entries: [] };
         renderTree();
-        document.getElementById('treeBody').appendChild(el('div', 'tree-error', '加载失败'));
+        document.getElementById('treeBody').appendChild(el('div', 'tree-error', t('treeLoadFailed')));
       });
     }
 
@@ -474,7 +539,7 @@
       bodyEl.textContent = '';
       if (!treeRoot) return;
       if (!treeRoot.entries || !treeRoot.entries.length) {
-        bodyEl.appendChild(el('div', 'empty', '（空目录）'));
+        bodyEl.appendChild(el('div', 'empty', t('emptyDir')));
         return;
       }
       treeRoot.entries.forEach(function (entry) {
@@ -483,7 +548,7 @@
     }
 
     function copyRef(path) {
-      copyText('@' + path, '已复制 @引用');
+      copyText('@' + path, t('copiedRef'));
     }
 
     function renderTreeNode(entry, depth) {
@@ -496,9 +561,9 @@
       row.appendChild(entry.isDir ? (treeExpanded[entry.path] ? folderOpenIcon() : folderClosedIcon()) : fileCodeIcon());
       row.appendChild(el('span', 'tree-name', entry.name));
 
-      var refBtn = el('button', 'tree-ref', '@引用');
+      var refBtn = el('button', 'tree-ref', t('quoteBadge'));
       refBtn.type = 'button';
-      refBtn.title = '复制 @path 引用';
+      refBtn.title = t('copyRefTip');
       refBtn.addEventListener('click', function (ev) { ev.stopPropagation(); copyRef(entry.path); });
       row.appendChild(refBtn);
 
@@ -513,7 +578,7 @@
         var node = treeChildren[entry.path];
         var childPad = 8 + (depth + 1) * 20 + 20;
         if (node && node.loading) {
-          var lr = el('div', 'tree-row tree-loading', '加载中…');
+          var lr = el('div', 'tree-row tree-loading', t('loading'));
           lr.style.paddingLeft = childPad + 'px';
           wrap.appendChild(lr);
         } else if (node && node.error) {
@@ -538,10 +603,10 @@
         treeChildren[path] = { loading: true };
         renderTree();
         fetch(listdirUrl(path), { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (res) {
-          treeChildren[path] = res && res.ok ? { entries: res.entries } : { error: (res && res.error) || '读取失败' };
+          treeChildren[path] = res && res.ok ? { entries: res.entries } : { error: (res && res.error) || t('loadFailed') };
           renderTree();
         }).catch(function () {
-          treeChildren[path] = { error: '读取失败' };
+          treeChildren[path] = { error: t('loadFailed') };
           renderTree();
         });
       } else {
@@ -559,6 +624,22 @@
       treeRefreshBtn.appendChild(refreshIcon());
       treeRefreshBtn.addEventListener('click', function () { loadTreeRoot(); });
     }
+    function applyStaticCopy() {
+      document.title = t('title')
+      function set(id, key, attr) {
+        var n = document.getElementById(id)
+        if (!n) return
+        if (attr) n[attr] = t(key); else n.textContent = t(key)
+      }
+      set('appTitle', 'title')
+      set('tabArtifacts', 'artifacts')
+      set('tabTree', 'fileTree')
+      set('treeRefresh', 'refresh', 'title')
+      set('previewHint', 'previewHint')
+      set('barPath', 'selectFile')
+    }
+    applyStaticCopy()
+
     function load() {
       var controller = typeof AbortController === 'function' ? new AbortController() : null;
       var timer = controller ? setTimeout(function () { controller.abort(); }, 8000) : null;

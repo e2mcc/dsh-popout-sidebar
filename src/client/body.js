@@ -67,10 +67,12 @@ window.__ModuleLoader__.load({
     // Canonical plugin body — extract this `return { ... }` for cordis_define.
     const plugin = (() => {
       return {
-  inject: ['timer'],
+  inject: ['timer', 'locale'],
   apply(ctx) {
     const slots = ctx.get('slots')
     if (slots === undefined) return
+
+@@i18n@@
 
 @@ext@@
 @@highlight@@

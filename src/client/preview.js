@@ -2,12 +2,12 @@
       const children = []
       if (diff && diff.before != null && diff.before !== '') {
         children.push(React.createElement('div', { key: 'del', className: 'artifacts-diff-block artifacts-diff-del' },
-          React.createElement('div', { className: 'artifacts-diff-label' }, '- 删除'),
+          React.createElement('div', { className: 'artifacts-diff-label' }, t('diffRemoved')),
           React.createElement('pre', { className: 'artifacts-diff-pre' }, diff.before),
         ))
       }
       children.push(React.createElement('div', { key: 'add', className: 'artifacts-diff-block artifacts-diff-add' },
-        React.createElement('div', { className: 'artifacts-diff-label' }, '+ 新增'),
+        React.createElement('div', { className: 'artifacts-diff-label' }, t('diffAdded')),
         React.createElement('pre', { className: 'artifacts-diff-pre' }, diff && diff.after != null ? diff.after : ''),
       ))
       return React.createElement('div', { className: 'artifacts-diff' }, children)
@@ -82,7 +82,7 @@
             resolve(window.pdfjsLib)
           } catch (e) { reject(e) }
         }
-        s.onerror = () => { _pdfjsPromise = null; reject(new Error('pdf.js 加载失败')) }
+        s.onerror = () => { _pdfjsPromise = null; reject(new Error(t('pdfLoadFailed'))) }
         document.head.appendChild(s)
       })
       return _pdfjsPromise
@@ -177,7 +177,7 @@
 
       if (phase === 'loading') {
         return React.createElement('div', { className: 'artifacts-pdfview' },
-          React.createElement('div', { className: 'artifacts-hint' }, '加载 PDF…'))
+          React.createElement('div', { className: 'artifacts-hint' }, t('loadingPdf')))
       }
       if (phase === 'error') {
         // Fall back to the browser's native viewer if pdf.js cannot load.
@@ -191,13 +191,13 @@
       const disabled = pageCount <= 0
       return React.createElement('div', { className: 'artifacts-pdfview' },
         React.createElement('div', { className: 'artifacts-pdfview-bar' },
-          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '缩小', disabled, onClick: () => zoomBy(0.8) }, '−'),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: t('zoomOut'), disabled, onClick: () => zoomBy(0.8) }, '−'),
           React.createElement('span', { className: 'artifacts-pdfview-zoom' }, Math.round(zoom * 100) + '%'),
-          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '放大', disabled, onClick: () => zoomBy(1.25) }, '＋'),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: t('zoomIn'), disabled, onClick: () => zoomBy(1.25) }, '＋'),
           React.createElement('span', { className: 'artifacts-pdfview-spacer' }),
-          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '上一页', disabled: disabled || pageNo <= 1, onClick: () => goPage(pageNo - 1) }, '‹'),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: t('prevPage'), disabled: disabled || pageNo <= 1, onClick: () => goPage(pageNo - 1) }, '‹'),
           React.createElement('span', { className: 'artifacts-pdfview-page' }, pageNo + ' / ' + pageCount),
-          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '下一页', disabled: disabled || pageNo >= pageCount, onClick: () => goPage(pageNo + 1) }, '›'),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: t('nextPage'), disabled: disabled || pageNo >= pageCount, onClick: () => goPage(pageNo + 1) }, '›'),
         ),
         React.createElement('div', { className: 'artifacts-pdfview-scroll', ref: scrollRef },
           React.createElement('canvas', { ref: canvasRef, className: 'artifacts-pdfview-canvas' }),
@@ -206,8 +206,8 @@
     }
 
     const renderPreview = (p) => {
-      if (p.loading) return React.createElement('div', { className: 'artifacts-hint' }, '加载中…')
-      if (p.ok === false) return React.createElement('div', { className: 'artifacts-error' }, p.error || '读取失败')
+      if (p.loading) return React.createElement('div', { className: 'artifacts-hint' }, t('loading'))
+      if (p.ok === false) return React.createElement('div', { className: 'artifacts-error' }, p.error || t('loadFailed'))
       const type = p.type || 'text'
       const body = []
       if (type === 'image') {
