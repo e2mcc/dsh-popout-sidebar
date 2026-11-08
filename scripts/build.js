@@ -64,6 +64,7 @@ write('src/host.js', host)
 
 // ── Client ──────────────────────────────────────────────────────────────
 let client = read('src/client/body.js')
+client = replaceAll(client, '@@i18n@@', read('src/client/i18n.js'))
 client = replaceAll(client, '@@ext@@', indent(ext, 4))
 client = replaceAll(client, '@@highlight@@', indent(highlight, 4))
 client = replaceAll(client, '@@markdown@@', indent(markdown, 4))

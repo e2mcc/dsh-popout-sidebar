@@ -67,10 +67,141 @@ window.__ModuleLoader__.load({
     // Canonical plugin body — extract this `return { ... }` for cordis_define.
     const plugin = (() => {
       return {
-  inject: ['timer'],
+  inject: ['timer', 'locale'],
   apply(ctx) {
     const slots = ctx.get('slots')
     if (slots === undefined) return
+
+    // Namespace and dictionaries for the DSH client locale service. Both
+    // baseline locales are required; the active language follows Settings →
+    // General, and registering after mount updates bound copy in place.
+    const NS = 'popoutSidebar'
+
+    const DICT = {
+      zh: {
+        artifacts: '产物',
+        fileTree: '文件树',
+        sidebarTitle: '弹出式侧边栏',
+        loading: '加载中…',
+        loadingFileTree: '加载文件树…',
+        loadFailed: '读取失败',
+        emptyDir: '（空目录）',
+        refresh: '刷新',
+        copied: '已复制',
+        copiedPath: '已复制路径',
+        copiedRefFailed: '已复制 @引用（未能写入输入框）',
+        insertedToInput: '已插入输入框',
+        cleared: '已清除',
+        clearFailed: '清除失败',
+        emptyArtifacts: '暂无产物 — 代理创建/编辑的文件会出现在这里。',
+        createBadge: '新建',
+        editBadge: '编辑',
+        clearThisArtifact: '清除该产物',
+        copyPath: '复制路径',
+        quoteIntoInputTip: '引用到输入框（失败则复制 @path）',
+        quoteIntoInput: '@引用到输入框',
+        quoteBadge: '@引用',
+        resizeWidth: '拖动调整宽度',
+        resizeDivider: '拖动调整产物列表与预览的分界',
+        collapseSidebar: '收起侧边栏',
+        openInTab: '在新标签页打开（可拖到另一块显示器）',
+        clearMode: '清除模式',
+        exitClearMode: '退出清除模式',
+        clear: '清除',
+        clearModeHint: '清除模式：点击产物标记，再点红色 × 清除（仅清除内存记录，不删除磁盘文件）',
+        expandPreview: '展开预览区',
+        collapsePreview: '收起预览区',
+        previewHint: '点击文件预览内容',
+        settingsIntro: '管理「Popout Sidebar」的显示与行为。',
+        defaultOpen: '默认展开',
+        defaultOpenDesc: '页面加载后侧边栏默认展开；关闭则默认收起，点右上角图标再打开。',
+        autoRefresh: '自动刷新',
+        autoRefreshDesc: '开启后侧边栏展开时将即时同步并更新产物列表',
+        fileTreeDesc: '在侧边栏显示「文件树」标签页，浏览工作区目录。',
+        minWidth: '最短面板宽度',
+        minWidthDesc: '面板的最小宽度（占窗口宽度的百分比，20–60）；更宽可通过拖动面板左边缘调整。',
+        previewHeight: '预览区默认高度',
+        previewHeightDesc: '预览区占面板高度的百分比（20–80），决定预览区与文件树/产物展示区分界线的位置；仍可拖动分界线临时调整。',
+        diffRemoved: '- 删除',
+        diffAdded: '+ 新增',
+        loadingPdf: '加载 PDF…',
+        pdfLoadFailed: 'pdf.js 加载失败',
+        zoomOut: '缩小',
+        zoomIn: '放大',
+        prevPage: '上一页',
+        nextPage: '下一页',
+      },
+      en: {
+        artifacts: 'Artifacts',
+        fileTree: 'File tree',
+        sidebarTitle: 'Popout Sidebar',
+        loading: 'Loading…',
+        loadingFileTree: 'Loading file tree…',
+        loadFailed: 'Failed to load',
+        emptyDir: '(empty directory)',
+        refresh: 'Refresh',
+        copied: 'Copied',
+        copiedPath: 'Copied path',
+        copiedRef: 'Copied @reference',
+        copiedRefFailed: 'Copied @reference (could not insert into the input)',
+        insertedToInput: 'Inserted into the input',
+        cleared: 'Cleared',
+        clearFailed: 'Failed to clear',
+        emptyArtifacts: 'No artifacts yet. Files created or edited by the agent will appear here.',
+        createBadge: 'New',
+        editBadge: 'Edit',
+        clearThisArtifact: 'Clear this artifact',
+        copyPath: 'Copy path',
+        quoteIntoInputTip: 'Quote into the input (copies @path if that fails)',
+        quoteIntoInput: 'Quote into the input',
+        quoteBadge: '@quote',
+        copyRefTip: 'Copy @path reference',
+        resizeWidth: 'Drag to resize',
+        resizeDivider: 'Drag to resize the artifact list and preview',
+        collapseSidebar: 'Collapse sidebar',
+        openInTab: 'Open in a new tab (you can drag it to another monitor)',
+        clearMode: 'Clear mode',
+        exitClearMode: 'Exit clear mode',
+        clear: 'Clear',
+        clearModeHint: 'Clear mode: click an artifact to mark it, then click the red × to remove it from the list (the file on disk is not deleted).',
+        expandPreview: 'Expand preview',
+        collapsePreview: 'Collapse preview',
+        previewHint: 'Click a file to preview it',
+        settingsIntro: 'Manage how Popout Sidebar is displayed and how it behaves.',
+        defaultOpen: 'Expand by default',
+        defaultOpenDesc: 'The sidebar opens by default when the page loads. Turn this off to keep it collapsed until you click the icon in the top-right corner.',
+        autoRefresh: 'Auto refresh',
+        autoRefreshDesc: 'Keep the artifact list in sync while the sidebar is open.',
+        fileTreeDesc: 'Show the File tree tab in the sidebar to browse the workspace.',
+        minWidth: 'Minimum panel width',
+        minWidthDesc: 'Minimum width of the panel, as a percentage of the window (20–60). Drag the left edge of the panel to make it wider.',
+        previewHeight: 'Default preview height',
+        previewHeightDesc: 'Preview height as a percentage of the panel (20–80). It sets where the divider between the preview and the file tree/artifact list starts; you can still drag the divider to adjust it temporarily.',
+        diffRemoved: '- Removed',
+        diffAdded: '+ Added',
+        loadingPdf: 'Loading PDF…',
+        pdfLoadFailed: 'Failed to load pdf.js',
+        zoomOut: 'Zoom out',
+        zoomIn: 'Zoom in',
+        prevPage: 'Previous page',
+        nextPage: 'Next page',
+      },
+    }
+
+    const locale = ctx.get('locale')
+    if (locale === undefined) return
+
+    ctx.effect(() => locale.register(NS, DICT), 'popout-sidebar: dictionaries')
+    const t = locale.bind(NS)
+
+    // bind() resolves against the active dictionary at call time, so a revision
+    // bump is enough to refresh every translated label in place when Settings →
+    // General switches the language; no remount of the overlay is needed.
+    const useLocaleRevision = () => {
+      const [, setRevision] = React.useState(0)
+      React.useEffect(() => locale.subscribe(() => setRevision((n) => n + 1)), [])
+    }
+
 
     // Shared extension → preview-type helpers (portable JS: var/function, no
     // template literals, so this file can be inlined verbatim into the host Node
@@ -836,12 +967,12 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       const children = []
       if (diff && diff.before != null && diff.before !== '') {
         children.push(React.createElement('div', { key: 'del', className: 'artifacts-diff-block artifacts-diff-del' },
-          React.createElement('div', { className: 'artifacts-diff-label' }, '- 删除'),
+          React.createElement('div', { className: 'artifacts-diff-label' }, t('diffRemoved')),
           React.createElement('pre', { className: 'artifacts-diff-pre' }, diff.before),
         ))
       }
       children.push(React.createElement('div', { key: 'add', className: 'artifacts-diff-block artifacts-diff-add' },
-        React.createElement('div', { className: 'artifacts-diff-label' }, '+ 新增'),
+        React.createElement('div', { className: 'artifacts-diff-label' }, t('diffAdded')),
         React.createElement('pre', { className: 'artifacts-diff-pre' }, diff && diff.after != null ? diff.after : ''),
       ))
       return React.createElement('div', { className: 'artifacts-diff' }, children)
@@ -916,7 +1047,7 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
             resolve(window.pdfjsLib)
           } catch (e) { reject(e) }
         }
-        s.onerror = () => { _pdfjsPromise = null; reject(new Error('pdf.js 加载失败')) }
+        s.onerror = () => { _pdfjsPromise = null; reject(new Error(t('pdfLoadFailed'))) }
         document.head.appendChild(s)
       })
       return _pdfjsPromise
@@ -1011,7 +1142,7 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
 
       if (phase === 'loading') {
         return React.createElement('div', { className: 'artifacts-pdfview' },
-          React.createElement('div', { className: 'artifacts-hint' }, '加载 PDF…'))
+          React.createElement('div', { className: 'artifacts-hint' }, t('loadingPdf')))
       }
       if (phase === 'error') {
         // Fall back to the browser's native viewer if pdf.js cannot load.
@@ -1025,13 +1156,13 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       const disabled = pageCount <= 0
       return React.createElement('div', { className: 'artifacts-pdfview' },
         React.createElement('div', { className: 'artifacts-pdfview-bar' },
-          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '缩小', disabled, onClick: () => zoomBy(0.8) }, '−'),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: t('zoomOut'), disabled, onClick: () => zoomBy(0.8) }, '−'),
           React.createElement('span', { className: 'artifacts-pdfview-zoom' }, Math.round(zoom * 100) + '%'),
-          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '放大', disabled, onClick: () => zoomBy(1.25) }, '＋'),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: t('zoomIn'), disabled, onClick: () => zoomBy(1.25) }, '＋'),
           React.createElement('span', { className: 'artifacts-pdfview-spacer' }),
-          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '上一页', disabled: disabled || pageNo <= 1, onClick: () => goPage(pageNo - 1) }, '‹'),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: t('prevPage'), disabled: disabled || pageNo <= 1, onClick: () => goPage(pageNo - 1) }, '‹'),
           React.createElement('span', { className: 'artifacts-pdfview-page' }, pageNo + ' / ' + pageCount),
-          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: '下一页', disabled: disabled || pageNo >= pageCount, onClick: () => goPage(pageNo + 1) }, '›'),
+          React.createElement('button', { type: 'button', className: 'artifacts-pdfview-btn', title: t('nextPage'), disabled: disabled || pageNo >= pageCount, onClick: () => goPage(pageNo + 1) }, '›'),
         ),
         React.createElement('div', { className: 'artifacts-pdfview-scroll', ref: scrollRef },
           React.createElement('canvas', { ref: canvasRef, className: 'artifacts-pdfview-canvas' }),
@@ -1040,8 +1171,8 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
     }
 
     const renderPreview = (p) => {
-      if (p.loading) return React.createElement('div', { className: 'artifacts-hint' }, '加载中…')
-      if (p.ok === false) return React.createElement('div', { className: 'artifacts-error' }, p.error || '读取失败')
+      if (p.loading) return React.createElement('div', { className: 'artifacts-hint' }, t('loading'))
+      if (p.ok === false) return React.createElement('div', { className: 'artifacts-error' }, p.error || t('loadFailed'))
       const type = p.type || 'text'
       const body = []
       if (type === 'image') {
@@ -1125,16 +1256,16 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
         if (nextExpanded[path] && !children[path]) {
           setChildren(Object.assign({}, children, { [path]: { loading: true } }))
           host.call('artifacts.listDir', { path, sessionId: currentSessionId() }).then((res) => {
-            setChildren((prev) => Object.assign({}, prev, { [path]: res && res.ok ? { entries: res.entries } : { error: (res && res.error) || '读取失败' } }))
+            setChildren((prev) => Object.assign({}, prev, { [path]: res && res.ok ? { entries: res.entries } : { error: (res && res.error) || t('loadFailed') } }))
           }).catch(() => {
-            setChildren((prev) => Object.assign({}, prev, { [path]: { error: '读取失败' } }))
+            setChildren((prev) => Object.assign({}, prev, { [path]: { error: t('loadFailed') } }))
           })
         }
       }
 
       const copyRef = (path) => {
         const text = '@' + path
-        let label = '已复制'
+        let label = t('copied')
         const done = () => {
           setCopiedPath(path)
           setCopiedLabel(label)
@@ -1143,7 +1274,7 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
         }
         // Prefer writing into the composer; fall back to clipboard copy.
         if (quoteToComposer(path)) {
-          label = '已插入输入框'
+          label = t('insertedToInput')
           done()
           return
         }
@@ -1153,13 +1284,13 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       }
 
       const rowActions = (entry) => (copiedPath === entry.path
-        ? React.createElement('span', { className: 'artifacts-tree-copied' }, copiedLabel || '已复制')
+        ? React.createElement('span', { className: 'artifacts-tree-copied' }, copiedLabel || t('copied'))
         : React.createElement('button', {
           type: 'button',
           className: 'artifacts-tree-ref',
-          title: '引用到输入框（失败则复制 @path）',
+          title: t('quoteIntoInputTip'),
           onClick: (e) => { e.stopPropagation(); copyRef(entry.path) },
-        }, '@引用'))
+        }, t('quoteBadge')))
 
       const renderNode = (entry, depth) => {
         const pad = { paddingLeft: 6 + depth * 20 }
@@ -1186,7 +1317,7 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
             ),
             isExpanded
               ? (node && node.loading
-                ? React.createElement('div', { className: 'artifacts-tree-row artifacts-tree-loading', style: { paddingLeft: 6 + (depth + 1) * 20 + 20 } }, '加载中…')
+                ? React.createElement('div', { className: 'artifacts-tree-row artifacts-tree-loading', style: { paddingLeft: 6 + (depth + 1) * 20 + 20 } }, t('loading'))
                 : node && node.error
                   ? React.createElement('div', { className: 'artifacts-tree-row artifacts-tree-error', style: { paddingLeft: 6 + (depth + 1) * 20 + 20 } }, node.error)
                   : node && node.entries
@@ -1213,19 +1344,20 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       return React.createElement('div', { className: 'artifacts-tree' },
         React.createElement('div', { className: 'artifacts-tree-header' },
           React.createElement('span', { className: 'artifacts-tree-root', title: root ? root.path : '' }, root ? basename(root.path) : '…'),
-          React.createElement('button', { type: 'button', className: 'artifacts-tree-refresh', title: '刷新', onClick: loadRoot }, RefreshIcon(14)),
+          React.createElement('button', { type: 'button', className: 'artifacts-tree-refresh', title: t('refresh'), onClick: loadRoot }, RefreshIcon(14)),
         ),
         React.createElement('div', { className: 'artifacts-tree-body' },
           !root
-            ? React.createElement('div', { className: 'artifacts-hint' }, '加载文件树…')
+            ? React.createElement('div', { className: 'artifacts-hint' }, t('loadingFileTree'))
             : (!root.entries || !root.entries.length)
-              ? React.createElement('div', { className: 'artifacts-hint' }, '（空目录）')
+              ? React.createElement('div', { className: 'artifacts-hint' }, t('emptyDir'))
               : root.entries.map((e) => renderNode(e, 0)),
         ),
       )
     }
 
     const ArtifactsPanel = () => {
+      useLocaleRevision()
       const open = useOpen()
       const settings = useSettings()
       const [items, setItems] = React.useState([])
@@ -1315,7 +1447,15 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       if (!open) return null
 
       const sid = currentSessionId()
-      const popoutHref = '/popout-sidebar' + (sid ? '?sessionId=' + encodeURIComponent(sid) : '')
+      // Carry the active language into the host-rendered popout tab so it
+      // speaks the same language as the sidebar; DSH locales other than
+      // Chinese fall back to English there.
+      const activeLocale = locale.getSnapshot().active
+      const popoutLang = /^zh/i.test(activeLocale) ? 'zh' : 'en'
+      const popoutQuery = []
+      if (sid) popoutQuery.push('sessionId=' + encodeURIComponent(sid))
+      popoutQuery.push('lang=' + popoutLang)
+      const popoutHref = '/popout-sidebar?' + popoutQuery.join('&')
 
       const startResize = (e) => {
         e.preventDefault()
@@ -1382,8 +1522,8 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
         } else { fallbackCopy(text); done() }
       }
       const quotePath = (path) => {
-        if (quoteToComposer(path)) { flash('已插入输入框'); return }
-        copyText('@' + path, '已复制 @引用（未能写入输入框）')
+        if (quoteToComposer(path)) { flash(t('insertedToInput')); return }
+        copyText('@' + path, t('copiedRefFailed'))
       }
 
       const remove = (path) => {
@@ -1392,11 +1532,11 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
             setItems((prev) => prev.filter((x) => x.path !== path))
             if (preview && preview.path === path) setPreview(null)
             setDeleteTarget(null)
-            flash('已清除')
+            flash(t('cleared'))
           } else {
-            flash((res && res.error) || '清除失败')
+            flash((res && res.error) || t('clearFailed'))
           }
-        }).catch(() => flash('清除失败'))
+        }).catch(() => flash(t('clearFailed')))
       }
 
       const openFile = (path, diff) => {
@@ -1422,7 +1562,7 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
 
       const listChildren = []
       if (!items.length) {
-        listChildren.push(React.createElement('div', { key: 'empty', className: 'artifacts-empty' }, '暂无产物 — 代理创建/编辑的文件会出现在这里。'))
+        listChildren.push(React.createElement('div', { key: 'empty', className: 'artifacts-empty' }, t('emptyArtifacts')))
       }
       items.forEach((it) => {
         const isDeleteMarked = deleteMode && deleteTarget === it.path
@@ -1441,7 +1581,7 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
             },
           },
             React.createElement('div', { className: 'artifacts-item-row' },
-              React.createElement('span', { className: 'artifacts-badge artifacts-badge-' + it.kind }, it.kind === 'create' ? '新建' : '编辑'),
+              React.createElement('span', { className: 'artifacts-badge artifacts-badge-' + it.kind }, it.kind === 'create' ? t('createBadge') : t('editBadge')),
               React.createElement('span', { className: 'artifacts-item-base' }, basename(it.path)),
             ),
             React.createElement('div', { className: 'artifacts-item-full' }, it.path),
@@ -1450,11 +1590,11 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
             isDeleteMarked ? React.createElement('button', {
               type: 'button',
               className: 'artifacts-minibtn artifacts-delete-x',
-              title: '清除该产物',
+              title: t('clearThisArtifact'),
               onClick: () => remove(it.path),
             }, '×') : null,
-            deleteMode ? null : React.createElement('button', { type: 'button', className: 'artifacts-minibtn', title: '复制路径', onClick: () => copyText(it.path, '已复制路径') }, '⧉'),
-            deleteMode ? null : React.createElement('button', { type: 'button', className: 'artifacts-minibtn', title: '@引用到输入框', onClick: () => quotePath(it.path) }, '@'),
+            deleteMode ? null : React.createElement('button', { type: 'button', className: 'artifacts-minibtn', title: t('copyPath'), onClick: () => copyText(it.path, t('copiedPath')) }, '⧉'),
+            deleteMode ? null : React.createElement('button', { type: 'button', className: 'artifacts-minibtn', title: t('quoteIntoInput'), onClick: () => quotePath(it.path) }, '@'),
           ),
         ))
       })
@@ -1462,11 +1602,11 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       return React.createElement('div', {
         className: 'artifacts-panel' + (resizing ? ' artifacts-resizing' : ''),
         style: { width: widthPx },
-        role: 'dialog', 'aria-label': 'Artifacts',
+        role: 'dialog', 'aria-label': t('artifacts'),
       },
         React.createElement('div', {
           className: 'artifacts-resize',
-          title: '拖动调整宽度',
+          title: t('resizeWidth'),
           onMouseDown: startResize,
         }),
         React.createElement('div', { className: 'artifacts-head' },
@@ -1474,7 +1614,7 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
             React.createElement('button', {
               type: 'button',
               className: 'artifacts-toggle',
-              title: '收起侧边栏',
+              title: t('collapseSidebar'),
               onClick: () => store.setOpen(false),
             }, PanelIcon(16)),
             React.createElement('a', {
@@ -1482,30 +1622,30 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
               href: popoutHref,
               target: '_blank',
               rel: 'noreferrer noopener',
-              title: '在新标签页打开（可拖到另一块显示器）',
+              title: t('openInTab'),
             }, '↖'),
           ),
-          React.createElement('span', { className: 'artifacts-title' }, '弹出式侧边栏'),
+          React.createElement('span', { className: 'artifacts-title' }, t('sidebarTitle')),
           React.createElement('span', { className: 'artifacts-spacer' }),
           notice ? React.createElement('span', { className: 'artifacts-notice' }, notice) : null,
           activeView === 'artifacts' ? React.createElement('button', {
             type: 'button',
             className: 'artifacts-iconbtn' + (deleteMode ? ' artifacts-delete-on' : ''),
-            title: deleteMode ? '退出清除模式' : '清除模式',
+            title: deleteMode ? t('exitClearMode') : t('clearMode'),
             onClick: () => { setDeleteMode(!deleteMode); setDeleteTarget(null) },
-          }, '清除') : null,
+          }, t('clear')) : null,
         ),
         settings.showFileTree ? React.createElement('div', { className: 'artifacts-tabs' },
           React.createElement('button', {
             type: 'button',
             className: 'artifacts-tab' + (activeView === 'artifacts' ? ' is-active' : ''),
             onClick: () => setActiveView('artifacts'),
-          }, '产物'),
+          }, t('artifacts')),
           React.createElement('button', {
             type: 'button',
             className: 'artifacts-tab' + (activeView === 'tree' ? ' is-active' : ''),
             onClick: () => { setActiveView('tree'); setDeleteMode(false); setDeleteTarget(null) },
-          }, '文件树'),
+          }, t('fileTree')),
         ) : null,
         React.createElement('div', {
           className: 'artifacts-main',
@@ -1522,19 +1662,19 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
             (activeView === 'tree' && settings.showFileTree)
               ? React.createElement(FileTree, { onOpen: openFile, selectedPath: preview ? preview.path : null })
               : [
-                  deleteMode ? React.createElement('div', { className: 'artifacts-delete-hint' }, '清除模式：点击产物标记，再点红色 × 清除（仅清除内存记录，不删除磁盘文件）') : null,
+                  deleteMode ? React.createElement('div', { className: 'artifacts-delete-hint' }, t('clearModeHint')) : null,
                   listChildren,
                 ],
           ),
           React.createElement('div', {
             className: 'artifacts-splitter' + (splitting ? ' artifacts-splitting' : '') + (collapsed ? ' artifacts-collapsed' : ''),
-            title: '拖动调整产物列表与预览的分界',
+            title: t('resizeDivider'),
             onMouseDown: startSplit,
           },
             React.createElement('button', {
               type: 'button',
               className: 'artifacts-collapse-btn',
-              title: collapsed ? '展开预览区' : '收起预览区',
+              title: collapsed ? t('expandPreview') : t('collapsePreview'),
               'aria-expanded': !collapsed,
               onMouseDown: (e) => e.stopPropagation(),
               onClick: () => { if (collapsed) expandPreview(); else setCollapsed(true) },
@@ -1544,7 +1684,7 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
             className: 'artifacts-preview',
             style: collapsed ? { flex: '0 0 0%', display: 'none' } : { flex: '1 1 auto', minHeight: 0 },
           },
-            preview ? renderPreview(preview) : React.createElement('div', { className: 'artifacts-hint' }, '点击文件预览内容'),
+            preview ? renderPreview(preview) : React.createElement('div', { className: 'artifacts-hint' }, t('previewHint')),
           ),
         ),
       )
@@ -1607,12 +1747,13 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
     // the fixed CSS position keeps it at the corner, offset left by the right
     // sidebar(s) so it never gets covered. Icon-only by design.
     const CornerButton = () => {
+      useLocaleRevision()
       const open = useOpen()
       if (open) return null
       return React.createElement('button', {
         type: 'button',
         className: 'artifacts-corner-btn',
-        title: '弹出式侧边栏',
+        title: t('sidebarTitle'),
         'aria-expanded': open,
         onClick: () => store.toggle(),
       }, PanelIcon(18))
@@ -1638,34 +1779,35 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
       )
 
     const SettingsSection = () => {
+      useLocaleRevision()
       const settings = useSettings()
       const set = (key, value) => settingsStore.set(key, value)
 
       return React.createElement('div', { className: 'artifacts-settings' },
-        React.createElement('p', { className: 'artifacts-setintro' }, '管理「Popout Sidebar」的显示与行为。'),
+        React.createElement('p', { className: 'artifacts-setintro' }, t('settingsIntro')),
         React.createElement('div', { className: 'artifacts-setgroup' },
           React.createElement(SettingsToggle, {
-            label: '默认展开',
-            desc: '页面加载后侧边栏默认展开；关闭则默认收起，点右上角图标再打开。',
+            label: t('defaultOpen'),
+            desc: t('defaultOpenDesc'),
             value: settings.defaultOpen,
             onToggle: (v) => set('defaultOpen', v),
           }),
           React.createElement(SettingsToggle, {
-            label: '自动刷新',
-            desc: '开启后侧边栏展开时将即时同步并更新产物列表',
+            label: t('autoRefresh'),
+            desc: t('autoRefreshDesc'),
             value: settings.autoRefresh,
             onToggle: (v) => set('autoRefresh', v),
           }),
           React.createElement(SettingsToggle, {
-            label: '文件树',
-            desc: '在侧边栏显示「文件树」标签页，浏览工作区目录。',
+            label: t('fileTree'),
+            desc: t('fileTreeDesc'),
             value: settings.showFileTree,
             onToggle: (v) => set('showFileTree', v),
           }),
           React.createElement('div', { className: 'artifacts-setrow' },
             React.createElement('div', { className: 'artifacts-settext' },
-              React.createElement('div', { className: 'artifacts-settitle' }, '最短面板宽度'),
-              React.createElement('div', { className: 'artifacts-setdesc' }, '面板的最小宽度（占窗口宽度的百分比，20–60）；更宽可通过拖动面板左边缘调整。'),
+              React.createElement('div', { className: 'artifacts-settitle' }, t('minWidth')),
+              React.createElement('div', { className: 'artifacts-setdesc' }, t('minWidthDesc')),
             ),
             React.createElement('div', { className: 'artifacts-setcontrol' },
               React.createElement('input', {
@@ -1685,8 +1827,8 @@ body[data-ds-dark-theme] .tok-property { color: #ced4da; }
           ),
           React.createElement('div', { className: 'artifacts-setrow' },
             React.createElement('div', { className: 'artifacts-settext' },
-              React.createElement('div', { className: 'artifacts-settitle' }, '预览区默认高度'),
-              React.createElement('div', { className: 'artifacts-setdesc' }, '预览区占面板高度的百分比（20–80），决定预览区与文件树/产物展示区分界线的位置；仍可拖动分界线临时调整。'),
+              React.createElement('div', { className: 'artifacts-settitle' }, t('previewHeight')),
+              React.createElement('div', { className: 'artifacts-setdesc' }, t('previewHeightDesc')),
             ),
             React.createElement('div', { className: 'artifacts-setcontrol' },
               React.createElement('input', {
