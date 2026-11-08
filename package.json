@@ -21,11 +21,13 @@
     "build": "node scripts/build.js"
   },
   "exports": {
+    "./locale/*.json": "./locale/*.json",
     ".": "./src/index.js",
     "./client": "./src/client.js",
     "./package.json": "./package.json"
   },
   "files": [
+    "locale",
     "src",
     "cordis.patch.yml",
     "README.md",
